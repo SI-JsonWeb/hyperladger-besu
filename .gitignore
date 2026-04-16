@@ -1,0 +1,17 @@
+# Dependencies - restore with npm install
+node_modules/
+
+# Compiled artifacts - regenerate with npm run compile
+contracts/*.json
+!contracts/*.sol
+
+# Local deployment config (created when running 1_deploy.js)
+# Contains the deployed contract address - unique per user
+scripts/invoice/config.json
+
+# Logs
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
