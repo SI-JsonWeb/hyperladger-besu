@@ -1,0 +1,7 @@
+spring:
+  application:
+    name: besu
+
+besu:
+  contract:
+    file: contracts/contract-address.txt

@@ -1,0 +1,220 @@
+services:
+  tessera1:
+    image: quorumengineering/tessera:24.4.2
+    container_name: tessera1
+    volumes:
+      - ./tessera1/tessera-config.json:/config/tessera-config.json
+      - ./tessera1/data:/data
+    command: -configfile /config/tessera-config.json
+    networks:
+      besu-network:
+        ipv4_address: 172.20.0.10
+
+  tessera2:
+    image: quorumengineering/tessera:24.4.2
+    container_name: tessera2
+    volumes:
+      - ./tessera2/tessera-config.json:/config/tessera-config.json
+      - ./tessera2/data:/data
+    command: -configfile /config/tessera-config.json
+    networks:
+      besu-network:
+        ipv4_address: 172.20.0.11
+
+  tessera3:
+    image: quorumengineering/tessera:24.4.2
+    container_name: tessera3
+    volumes:
+      - ./tessera3/tessera-config.json:/config/tessera-config.json
+      - ./tessera3/data:/data
+    command: -configfile /config/tessera-config.json
+    networks:
+      besu-network:
+        ipv4_address: 172.20.0.12
+
+  tessera4:
+    image: quorumengineering/tessera:24.4.2
+    container_name: tessera4
+    volumes:
+      - ./tessera4/tessera-config.json:/config/tessera-config.json
+      - ./tessera4/data:/data
+    command: -configfile /config/tessera-config.json
+    networks:
+      besu-network:
+        ipv4_address: 172.20.0.13
+  node1:
+    image: hyperledger/besu:24.1.0
+    container_name: besu-node1
+    user: root
+    depends_on:
+      - tessera1
+    ports:
+      - "8545:8545"
+      - "30303:30303"
+    volumes:
+      - ./node1/keys:/opt/besu/keys
+      - ./genesis.json:/opt/besu/genesis.json
+      - node1-data:/opt/besu/data
+    command: >
+      --genesis-file=/opt/besu/genesis.json
+      --node-private-key-file=/opt/besu/keys/key
+      --data-path=/opt/besu/data
+      --p2p-host=0.0.0.0
+      --p2p-port=30303
+      --rpc-http-enabled
+      --rpc-http-api=ETH,NET,QBFT,ADMIN,WEB3,EEA,PRIV
+      --rpc-http-host=0.0.0.0
+      --rpc-http-port=8545
+      --rpc-http-cors-origins=all
+      --host-allowlist=*
+      --min-gas-price=0
+      --tx-pool-min-gas-price=0
+      --privacy-enabled
+      --privacy-url=http://tessera1:9082
+      --privacy-public-key-file=/opt/besu/keys/tessera1.pub
+    networks:
+      besu-network:
+        ipv4_address: 172.20.0.2
+
+  node2:
+    image: hyperledger/besu:24.1.0
+    container_name: besu-node2
+    user: root
+    depends_on:
+      - node1
+      - tessera2
+    ports:
+      - "8546:8545"
+    volumes:
+      - ./node2/keys:/opt/besu/keys
+      - ./genesis.json:/opt/besu/genesis.json
+      - node2-data:/opt/besu/data
+    command: >
+      --genesis-file=/opt/besu/genesis.json
+      --node-private-key-file=/opt/besu/keys/key
+      --data-path=/opt/besu/data
+      --p2p-host=0.0.0.0
+      --p2p-port=30303
+      --bootnodes=enode://158ea06dc8d2b272cde51bf49944c2f8b5889bf44f19f53f8211647dd44b9f57c6b7ba71ece1d43c3e825e3072f89bd1d1524787c39c9f31cfdff2e52138baee@172.20.0.2:30303
+      --rpc-http-enabled
+      --rpc-http-api=ETH,NET,QBFT,ADMIN,WEB3
+      --rpc-http-host=0.0.0.0
+      --rpc-http-port=8545
+      --rpc-http-cors-origins=all
+      --host-allowlist=*
+      --min-gas-price=0
+      --tx-pool-min-gas-price=0
+      --privacy-enabled
+      --privacy-url=http://tessera2:9082
+      --privacy-public-key-file=/opt/besu/keys/tessera2.pub
+    networks:
+      - besu-network
+
+  node3:
+    image: hyperledger/besu:24.1.0
+    container_name: besu-node3
+    user: root
+    depends_on:
+      - node1
+      - tessera3
+    ports:
+      - "8547:8545"
+    volumes:
+      - ./node3/keys:/opt/besu/keys
+      - ./genesis.json:/opt/besu/genesis.json
+      - node3-data:/opt/besu/data
+    command: >
+      --genesis-file=/opt/besu/genesis.json
+      --node-private-key-file=/opt/besu/keys/key
+      --data-path=/opt/besu/data
+      --p2p-host=0.0.0.0
+      --p2p-port=30303
+      --bootnodes=enode://158ea06dc8d2b272cde51bf49944c2f8b5889bf44f19f53f8211647dd44b9f57c6b7ba71ece1d43c3e825e3072f89bd1d1524787c39c9f31cfdff2e52138baee@172.20.0.2:30303
+      --rpc-http-enabled
+      --rpc-http-api=ETH,NET,QBFT,ADMIN,WEB3
+      --rpc-http-host=0.0.0.0
+      --rpc-http-port=8545
+      --rpc-http-cors-origins=all
+      --host-allowlist=*
+      --min-gas-price=0
+      --tx-pool-min-gas-price=0
+      --privacy-enabled
+      --privacy-url=http://tessera3:9082
+      --privacy-public-key-file=/opt/besu/keys/tessera3.pub
+    networks:
+      - besu-network
+
+  node4:
+    image: hyperledger/besu:24.1.0
+    container_name: besu-node4
+    user: root
+    depends_on:
+      - node1
+      - tessera4
+    ports:
+      - "8548:8545"
+    volumes:
+      - ./node4/keys:/opt/besu/keys
+      - ./genesis.json:/opt/besu/genesis.json
+      - node4-data:/opt/besu/data
+    command: >
+      --genesis-file=/opt/besu/genesis.json
+      --node-private-key-file=/opt/besu/keys/key
+      --data-path=/opt/besu/data
+      --p2p-host=0.0.0.0
+      --p2p-port=30303
+      --bootnodes=enode://158ea06dc8d2b272cde51bf49944c2f8b5889bf44f19f53f8211647dd44b9f57c6b7ba71ece1d43c3e825e3072f89bd1d1524787c39c9f31cfdff2e52138baee@172.20.0.2:30303
+      --rpc-http-enabled
+      --rpc-http-api=ETH,NET,QBFT,ADMIN,WEB3
+      --rpc-http-host=0.0.0.0
+      --rpc-http-port=8545
+      --rpc-http-cors-origins=all
+      --host-allowlist=*
+      --min-gas-price=0
+      --tx-pool-min-gas-price=0
+      --privacy-enabled
+      --privacy-url=http://tessera4:9082
+      --privacy-public-key-file=/opt/besu/keys/tessera4.pub
+    networks:
+      - besu-network
+  rogue-node:
+    image: hyperledger/besu:24.1.0
+    container_name: besu-rogue
+    user: root
+    ports:
+      - "8549:8545"
+    volumes:
+      - ./rogue/keys:/opt/besu/keys
+      - ./genesis.json:/opt/besu/genesis.json
+      - rogue-data:/opt/besu/data
+    command: >
+      --genesis-file=/opt/besu/genesis.json
+      --node-private-key-file=/opt/besu/keys/key
+      --data-path=/opt/besu/data
+      --p2p-host=0.0.0.0
+      --p2p-port=30303
+      --bootnodes=enode://158ea06dc8d2b272cde51bf49944c2f8b5889bf44f19f53f8211647dd44b9f57c6b7ba71ece1d43c3e825e3072f89bd1d1524787c39c9f31cfdff2e52138baee@172.20.0.2:30303
+      --rpc-http-enabled
+      --rpc-http-api=ETH,NET,QBFT,ADMIN,WEB3
+      --rpc-http-host=0.0.0.0
+      --rpc-http-port=8545
+      --rpc-http-cors-origins=all
+      --host-allowlist=*
+      --min-gas-price=0
+      --tx-pool-min-gas-price=0
+    networks:
+      - besu-network
+
+volumes:
+  node1-data:
+  node2-data:
+  node3-data:
+  node4-data:
+  rogue-data:
+
+networks:
+  besu-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
