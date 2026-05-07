@@ -1,0 +1,23 @@
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Caller
+    participant Contract as DoubleFinancingPreventer
+    participant State as assets mapping
+    participant Lender
+
+    Caller->>Contract: repayAndRelease(assetId) { msg.value }
+    Contract->>Contract: require(assets[assetId].owner != address(0))
+    Contract->>Contract: require(assets[assetId].pledged == true)
+    Contract->>Contract: require(msg.value == assets[assetId].lienAmount)
+
+    Contract->>Contract: lender = assets[assetId].lender
+    Contract->>Contract: amount = assets[assetId].lienAmount
+
+    Contract->>State: assets[assetId].pledged = false
+    Contract->>State: assets[assetId].lender = address(0)
+    Contract->>State: assets[assetId].lienAmount = 0
+
+    Contract->>Lender: transfer(amount)
+    Contract-->>Caller: LienReleased(assetId, owner)
+```

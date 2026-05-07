@@ -1,0 +1,15 @@
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Caller
+    participant Contract as DoubleFinancingPreventer
+    participant State as assets mapping
+    participant FileStore as assetFiles mapping
+
+    Caller->>Contract: registerAsset(assetId)
+    Contract->>Contract: require(assetId > 0)
+    Contract->>Contract: require(assets[assetId].owner == address(0))
+    Contract->>State: assets[assetId] = Asset({ owner: Caller, pledged: false, lender: 0, lienAmount: 0 })
+    Contract->>State: assetsByOwner[Caller].push(assetId)
+    Contract-->>Caller: AssetRegistered(assetId, Caller)
+```

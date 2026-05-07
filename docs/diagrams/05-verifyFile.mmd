@@ -1,0 +1,18 @@
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Caller
+    participant Contract as DoubleFinancingPreventer
+    participant FileStore as assetFiles mapping
+
+    Caller->>Contract: verifyFile(assetId, providedHash)
+    Contract->>Contract: require(bytes(assetFiles[assetId].fileHash).length > 0)
+
+    alt Hash matches
+        Contract-->>Caller: true (PASS - file integrity confirmed)
+    else Hash does not match
+        Contract-->>Caller: false (FAIL - file may be tampered)
+    end
+
+    Note over Caller,Contract: Anyone can verify by:<br/>1. Downloading the file from fileURI<br/>2. Computing SHA-256 locally<br/>3. Calling verifyFile to compare
+```

@@ -1,0 +1,17 @@
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Caller
+    participant Contract as DoubleFinancingPreventer
+    participant State as assets mapping
+    participant FileStore as assetFiles mapping
+
+    Caller->>Contract: registerFile(assetId, fileURI, fileHash)
+    Contract->>Contract: require(assets[assetId].owner != address(0))
+    Contract->>Contract: require(assets[assetId].owner == Caller)
+
+    Contract->>FileStore: assetFiles[assetId] = FileRecord({ fileURI, fileHash, timestamp: block.timestamp })
+    Contract-->>Caller: FileRegistered(assetId, fileHash, fileURI)
+
+    Note over Caller,FileStore: fileHash = SHA-256 of the physical file<br/>fileURI = IPFS CID (e.g. ipfs://Qm.../file.pdf)
+```

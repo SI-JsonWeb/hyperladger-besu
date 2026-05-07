@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DoubleFinancing Preventer - Fraud Detection Demo</title>
+    <script src="https://cdn.jsdelivr.net/npm/ethers@6.7.1/dist/ethers.umd.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #0f1419;
+            color: #e6e6e6;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { max-width: 1000px; margin: 0 auto; }
+        h1 {
+            text-align: center;
+            color: #4ade80;
+            margin-bottom: 10px;
+            font-size: 2rem;
+        }
+        .subtitle {
+            text-align: center;
+            color: #888;
+            margin-bottom: 30px;
+        }
+        .card {
+            background: #1a2332;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border: 1px solid #2d3748;
+        }
+        .card h2 {
+            color: #4ade80;
+            margin-bottom: 15px;
+            font-size: 1.1rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .status-bar {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            padding: 15px;
+            background: #0f1419;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .status-item {
+            display: flex;
+            flex-direction: column;
+        }
+        .status-label { font-size: 0.75rem; color: #888; text-transform: uppercase; }
+        .status-value { font-size: 0.9rem; color: #4ade80; font-family: monospace; }
+        .status-value.error { color: #f87171; }
+        .status-value.warning { color: #fbbf24; }
+        button {
+            background: #4ade80;
+            color: #0f1419;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+        button:hover { background: #22c55e; transform: translateY(-1px); }
+        button:disabled { background: #374151; color: #666; cursor: not-allowed; }
+        button.danger { background: #f87171; }
+        button.danger:hover { background: #ef4444; }
+        input, select {
+            background: #0f1419;
+            border: 1px solid #2d3748;
+            color: #e6e6e6;
+            padding: 10px 14px;
+            border-radius: 6px;
+            font-size: 0.95rem;
+            width: 100%;
+            margin-bottom: 10px;
+        }
+        input:focus, select:focus { outline: none; border-color: #4ade80; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .form-group { margin-bottom: 15px; }
+        .form-row { display: flex; gap: 10px; }
+        .form-row input { flex: 1; }
+        .result-box {
+            background: #0f1419;
+            border-radius: 6px;
+            padding: 12px;
+            margin-top: 10px;
+            font-family: monospace;
+            font-size: 0.85rem;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+        .result-box.success { border-left: 3px solid #4ade80; }
+        .result-box.error { border-left: 3px solid #f87171; }
+        .event-log {
+            background: #0f1419;
+            border-radius: 6px;
+            padding: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 0.8rem;
+        }
+        .event-item {
+            padding: 8px;
+            border-bottom: 1px solid #2d3748;
+        }
+        .event-item:last-child { border-bottom: none; }
+        .event-time { color: #888; font-size: 0.75rem; }
+        .event-name { color: #fbbf24; font-weight: bold; }
+        .event-data { color: #a5b4fc; margin-top: 4px; }
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: bold;
+        }
+        .badge.success { background: #22c55e33; color: #4ade80; }
+        .badge.danger { background: #ef444433; color: #f87171; }
+        .network-info {
+            text-align: center;
+            padding: 20px;
+            background: #1a2332;
+            border-radius: 12px;
+            border: 1px solid #2d3748;
+        }
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 16px 24px;
+            border-radius: 8px;
+            color: #fff;
+            font-weight: 600;
+            z-index: 1000;
+            animation: slideIn 0.3s ease-out, fadeOut 0.5s ease-in 2.5s forwards;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+        .toast.fraud { background: #ef4444; border-left: 4px solid #f87171; }
+        .toast.flag  { background: #f59e0b; border-left: 4px solid #fbbf24; }
+        .toast.info  { background: #3b82f6; border-left: 4px solid #60a5fa; }
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to   { transform: translateX(0);    opacity: 1; }
+        }
+        @keyframes fadeOut {
+            from { opacity: 1; }
+            to   { opacity: 0; }
+        }
+        .event-name.fraud { color: #ef4444; font-weight: bold; }
+        .connect-section {
+            text-align: center;
+            padding: 40px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>DoubleFinancing Preventer</h1>
+        <p class="subtitle">Blockchain Fraud Detection Demo - Quorum Test Network</p>
+
+        <!-- Connection Status -->
+        <div class="card">
+            <h2> Wallet Connection</h2>
+            <div class="status-bar" id="statusBar">
+                <div class="status-item">
+                    <span class="status-label">Status</span>
+                    <span class="status-value" id="connectionStatus">Disconnected</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Network</span>
+                    <span class="status-value" id="networkName">-</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Chain ID</span>
+                    <span class="status-value" id="chainId">-</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Wallet</span>
+                    <span class="status-value" id="walletAddress">-</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Balance</span>
+                    <span class="status-value" id="balance">-</span>
+                </div>
+            </div>
+            <div class="form-row">
+                <button id="connectMetaMask" onclick="connectMetaMask()">Connect MetaMask</button>
+                <button id="connectTest" onclick="connectTestWallet()">Use Test Wallet</button>
+            </div>
+        </div>
+
+        <!-- Contract Info -->
+        <div class="card">
+            <h2> Contract Info</h2>
+            <div class="status-bar">
+                <div class="status-item">
+                    <span class="status-label">Contract Address</span>
+                    <span class="status-value" id="contractAddress">0x5798Cf2507399e4B45fb9D2fbB255299e0070294</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">RPC Endpoint</span>
+                    <span class="status-value">http://localhost:8545</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Asset Lookup -->
+        <div class="card">
+            <h2> Asset Lookup</h2>
+            <div class="form-row">
+                <input type="number" id="lookupAssetId" placeholder="Enter Asset ID (e.g. 999)" min="1">
+                <button onclick="lookupAsset()">Lookup</button>
+            </div>
+            <div class="result-box" id="assetLookupResult">
+                Enter an asset ID and click Lookup to see its info
+            </div>
+        </div>
+
+        <!-- Main Grid: Register / Finance / Repay -->
+        <div class="grid">
+            <div class="card">
+                <h2> Register Asset</h2>
+                <div class="form-group">
+                    <input type="number" id="registerAssetId" placeholder="Asset ID (e.g. 999)" min="1">
+                </div>
+                <button onclick="registerAsset()">Register Asset</button>
+                <div class="result-box" id="registerResult"></div>
+            </div>
+
+            <div class="card">
+                <h2> Request Financing</h2>
+                <div class="form-group">
+                    <input type="number" id="financeAssetId" placeholder="Asset ID" min="1">
+                </div>
+                <div class="form-group">
+                    <input type="number" id="financeAmount" placeholder="Amount (ETH)" step="0.01" min="0">
+                </div>
+                <button onclick="requestFinancing()">Pledge Asset</button>
+                <div class="result-box" id="financeResult"></div>
+            </div>
+
+            <div class="card">
+                <h2> Repay & Release Lien</h2>
+                <div class="form-group">
+                    <input type="number" id="repayAssetId" placeholder="Asset ID" min="1">
+                </div>
+                <div class="form-group">
+                    <input type="number" id="repayAmount" placeholder="Amount (ETH)" step="0.01" min="0">
+                </div>
+                <button onclick="repayAndRelease()">Repay & Release</button>
+                <div class="result-box" id="repayResult"></div>
+            </div>
+
+            <div class="card">
+                <h2> Fraud Alerts</h2>
+                <button onclick="getFlaggedAccounts()">Refresh Flagged Accounts</button>
+                <button onclick="clearFlaggedAccounts()" class="danger" style="margin-left: 10px;">Clear All</button>
+                <div class="result-box" id="flaggedResult">
+                    No flagged accounts yet
+                </div>
+            </div>
+        </div>
+
+        <!-- File Storage -->
+        <div class="card">
+            <h2> Off-Chain File Storage</h2>
+            <p style="color:#888;font-size:0.85rem;margin-bottom:15px;">
+                Upload a document to compute its SHA-256 hash, then register it on-chain
+                with an IPFS URI for tamper-proof verification.
+            </p>
+            <div class="form-group">
+                <input type="number" id="fileAssetId" placeholder="Asset ID" min="1">
+            </div>
+            <div class="form-group">
+                <input type="file" id="fileInput" accept=".pdf,.doc,.docx,.txt" style="background:#0f1419;border:1px solid #2d3748;color:#e6e6e6;padding:10px;border-radius:6px;width:100%">
+            </div>
+            <div class="form-group">
+                <input type="text" id="fileURI" placeholder="IPFS URI (e.g. ipfs://Qm... )">
+            </div>
+            <div class="form-group" id="fileHashDisplay" style="display:none">
+                <span style="font-size:0.8rem;color:#888">SHA-256:</span>
+                <code id="computedHash" style="color:#4ade80;font-size:0.8rem;word-break:break-all"></code>
+            </div>
+            <div class="form-group">
+                <button onclick="computeHash()">Compute Hash</button>
+                <button onclick="registerFile()" id="regFileBtn" disabled>Register File</button>
+            </div>
+            <div class="result-box" id="fileResult"></div>
+
+            <hr style="border-color:#2d3748;margin:20px 0">
+
+            <h3 style="color:#4ade80;margin-bottom:10px;font-size:1rem">Verify File Integrity</h3>
+            <div class="form-group">
+                <input type="number" id="verifyAssetId" placeholder="Asset ID to verify" min="1">
+            </div>
+            <div class="form-group">
+                <input type="text" id="verifyHashInput" placeholder="Paste file hash to verify">
+            </div>
+            <button onclick="verifyFileFromUI()">Verify</button>
+            <div class="result-box" id="verifyResult" style="margin-top:10px"></div>
+        </div>
+
+        <!-- Event Log -->
+        <div class="card">
+            <h2> Real-Time Event Log</h2>
+            <button onclick="startEventListener()" id="eventBtn" style="margin-bottom: 15px;">Start Listening</button>
+            <div class="event-log" id="eventLog">
+                <div class="event-item" style="color: #888;">No events yet. Click "Start Listening" to monitor blockchain events.</div>
+            </div>
+        </div>
+
+        <!-- Quick Demo Guide -->
+        <div class="card">
+            <h2> Quick Demo Guide</h2>
+            <div style="font-size: 0.9rem; line-height: 1.6;">
+                <p><strong>1. Connect:</strong> Click "Use Test Wallet" to connect with the pre-funded test account.</p>
+                <p><strong>2. Register:</strong> Enter asset ID <code>999</code> and click Register Asset.</p>
+                <p><strong>3. Finance:</strong> Enter asset ID <code>999</code>, amount <code>1</code>, click Pledge Asset.</p>
+                <p><strong>4. Try Fraud:</strong> Try to pledge asset <code>999</code> again - it will FAIL and flag your account!</p>
+                <p><strong>5. Repay:</strong> Repay the loan (1 ETH) to release the lien.</p>
+                <p><strong>6. Check Fraud:</strong> Click "Refresh Flagged Accounts" to see flagged addresses.</p>
+                <p><strong>7. Events:</strong> Click "Start Listening" to see real-time blockchain events.</p>
+                <p><strong>8. Upload File:</strong> In "Off-Chain File Storage", enter asset ID, upload a PDF, click "Compute Hash", paste an IPFS URI, click "Register File".</p>
+                <p><strong>9. Verify:</strong> Use "Verify File Integrity" to confirm a hash matches the on-chain record.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Contract configuration
+        const CONTRACT_ADDRESS = "0x594e68f223a390500467346151C9C7E6f9C1faeA";
+        const RPC_URL = "http://localhost:8545";
+        const TEST_PRIVATE_KEY = "0x8f2a55949038a9610f50fb23b5883af3b4ecb3c3bb792cbcefbd1542c692be63";
+
+        // ABI - extracted from compiled contract
+        const ABI = [
+            {"inputs":[{"internalType":"uint256","name":"assetId","type":"uint256"}],"name":"registerAsset","outputs":[],"stateMutability":"nonpayable","type":"function"},
+            {"inputs":[{"internalType":"uint256","name":"assetId","type":"uint256"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"requestFinancing","outputs":[],"stateMutability":"nonpayable","type":"function"},
+            {"inputs":[{"internalType":"uint256","name":"assetId","type":"uint256"}],"name":"repayAndRelease","outputs":[],"stateMutability":"payable","type":"function"},
+            {"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"flagAccount","outputs":[],"stateMutability":"nonpayable","type":"function"},
+            {"inputs":[{"internalType":"uint256","name":"assetId","type":"uint256"}],"name":"isAssetFree","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},
+            {"inputs":[{"internalType":"uint256","name":"assetId","type":"uint256"}],"name":"getAssetInfo","outputs":[{"internalType":"address","name":"owner","type":"address"},{"internalType":"bool","name":"pledged","type":"bool"},{"internalType":"address","name":"lender","type":"address"},{"internalType":"uint256","name":"lienAmount","type":"uint256"}],"stateMutability":"view","type":"function"},
+            {"inputs":[],"name":"getFlaggedAccounts","outputs":[{"internalType":"address[]","name":"","type":"address[]"}],"stateMutability":"view","type":"function"},
+            {"inputs":[{"internalType":"address","name":"","type":"address"}],"name":"flaggedAccounts","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},
+            {"inputs":[],"name":"clearFlaggedAccounts","outputs":[],"stateMutability":"nonpayable","type":"function"},
+            {"anonymous":false,"inputs":[{"indexed":true,"internalType":"uint256","name":"assetId","type":"uint256"},{"indexed":true,"internalType":"address","name":"owner","type":"address"}],"name":"AssetRegistered","type":"event"},
+            {"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"borrower","type":"address"},{"indexed":true,"internalType":"uint256","name":"assetId","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"amount","type":"uint256"},{"indexed":true,"internalType":"address","name":"lender","type":"address"}],"name":"FinancingRecorded","type":"event"},
+            {"anonymous":false,"inputs":[{"indexed":true,"internalType":"uint256","name":"assetId","type":"uint256"},{"indexed":true,"internalType":"address","name":"borrower","type":"address"}],"name":"LienReleased","type":"event"},
+            {"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"borrower","type":"address"},{"indexed":true,"internalType":"uint256","name":"assetId","type":"uint256"},{"indexed":false,"internalType":"string","name":"reason","type":"string"}],"name":"FraudAttemptDetected","type":"event"},
+            {"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"account","type":"address"},{"indexed":false,"internalType":"string","name":"reason","type":"string"}],"name":"AccountFlagged","type":"event"},
+            {"inputs":[{"internalType":"uint256","name":"assetId","type":"uint256"},{"internalType":"string","name":"fileURI","type":"string"},{"internalType":"string","name":"fileHash","type":"string"}],"name":"registerFile","outputs":[],"stateMutability":"nonpayable","type":"function"},
+            {"inputs":[{"internalType":"uint256","name":"assetId","type":"uint256"},{"internalType":"string","name":"providedHash","type":"string"}],"name":"verifyFile","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},
+            {"inputs":[{"internalType":"uint256","name":"assetId","type":"uint256"}],"name":"getFileInfo","outputs":[{"internalType":"string","name":"fileURI","type":"string"},{"internalType":"string","name":"fileHash","type":"string"},{"internalType":"uint256","name":"timestamp","type":"uint256"}],"stateMutability":"view","type":"function"},
+            {"anonymous":false,"inputs":[{"indexed":true,"internalType":"uint256","name":"assetId","type":"uint256"},{"indexed":false,"internalType":"string","name":"fileHash","type":"string"},{"indexed":false,"internalType":"string","name":"fileURI","type":"string"}],"name":"FileRegistered","type":"event"}
+        ];
+
+        let provider;
+        let signer;
+        let contract;
+        let eventListener = null;
+
+        function log(msg, elementId) {
+            const el = document.getElementById(elementId);
+            el.textContent = typeof msg === 'object' ? JSON.stringify(msg, null, 2) : msg;
+        }
+
+        function logResult(elementId, success, message) {
+            const el = document.getElementById(elementId);
+            el.textContent = message;
+            el.className = 'result-box ' + (success ? 'success' : 'error');
+        }
+
+        function showToast(message, type) {
+            const existing = document.querySelector('.toast');
+            if (existing) existing.remove();
+            const toast = document.createElement('div');
+            toast.className = 'toast ' + type;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+        }
+
+        function addEventToLog(eventName, data) {
+            const logEl = document.getElementById('eventLog');
+            const time = new Date().toLocaleTimeString();
+            const isFraud = eventName === 'FraudAttemptDetected' || eventName === 'AccountFlagged';
+            let html = `<div class="event-item">
+                <div class="event-time">${time}</div>
+                <div class="event-name${isFraud ? ' fraud' : ''}">${eventName}</div>
+                <div class="event-data">${typeof data === 'object' ? JSON.stringify(data) : data}</div>
+            </div>`;
+            if (logEl.firstChild && logEl.firstChild.textContent.includes('No events')) {
+                logEl.innerHTML = html;
+            } else {
+                logEl.innerHTML = html + logEl.innerHTML;
+            }
+            if (eventName === 'FraudAttemptDetected') {
+                showToast('FRAUD DETECTED: ' + (data.reason || ''), 'fraud');
+            } else if (eventName === 'AccountFlagged') {
+                showToast('ACCOUNT FLAGGED: ' + String(data.account || '').slice(0, 10) + '...', 'flag');
+            }
+        }
+
+        async function connectTestWallet() {
+            try {
+                logResult('registerResult', true, 'Connecting to http://localhost:8545...');
+                logResult('financeResult', true, 'Provider: ' + RPC_URL);
+                logResult('repayResult', true, 'Contract: ' + CONTRACT_ADDRESS);
+                provider = new ethers.JsonRpcProvider(RPC_URL);
+                logResult('registerResult', true, 'Provider created, now creating wallet...');
+                signer = new ethers.Wallet(TEST_PRIVATE_KEY, provider);
+                logResult('registerResult', true, 'Wallet created: ' + signer.address);
+                contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, signer);
+                logResult('registerResult', true, 'Contract loaded, updating status...');
+                await updateStatus();
+                logResult('registerResult', true, 'Connected! Wallet: ' + signer.address.slice(0,10) + '...');
+            } catch (err) {
+                console.error('Full error:', err);
+                const msg = err.message || err.reason || String(err);
+                logResult('registerResult', false, 'Connection failed: ' + msg.slice(0, 300));
+                alert('Connection failed: ' + msg.slice(0, 200));
+            }
+        }
+
+        async function connectMetaMask() {
+            try {
+                if (!window.ethereum) {
+                    alert('MetaMask not found! Please install MetaMask or use Test Wallet.');
+                    return;
+                }
+                provider = new ethers.BrowserProvider(window.ethereum);
+                await provider.send("eth_requestAccounts", []);
+                signer = await provider.getSigner();
+                contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, signer);
+                updateStatus();
+                logResult('registerResult', true, 'Connected with MetaMask: ' + signer.address.slice(0,10) + '...');
+            } catch (err) {
+                logResult('registerResult', false, 'MetaMask connection failed: ' + err.message);
+            }
+        }
+
+        async function updateStatus() {
+            if (!provider || !signer) return;
+            const network = await provider.getNetwork();
+            const balance = await provider.getBalance(signer.address);
+            document.getElementById('connectionStatus').textContent = 'Connected';
+            document.getElementById('connectionStatus').className = 'status-value';
+            document.getElementById('networkName').textContent = network.name || 'Quorum';
+            document.getElementById('chainId').textContent = network.chainId.toString();
+            document.getElementById('walletAddress').textContent = signer.address.slice(0,6) + '...' + signer.address.slice(-4);
+            document.getElementById('balance').textContent = parseFloat(ethers.formatEther(balance)).toFixed(2) + ' ETH';
+        }
+
+        async function registerAsset() {
+            const assetId = document.getElementById('registerAssetId').value;
+            if (!assetId) { alert('Please enter an asset ID'); return; }
+            if (!contract) { alert('Please connect wallet first'); return; }
+            try {
+                logResult('registerResult', true, 'Registering asset #' + assetId + '...');
+                const tx = await contract.registerAsset(assetId);
+                const receipt = await tx.wait();
+                logResult('registerResult', true, 'Asset #' + assetId + ' registered! Tx: ' + receipt.hash.slice(0,10) + '...');
+                addEventToLog('AssetRegistered', { assetId: assetId, owner: signer.address });
+            } catch (err) {
+                logResult('registerResult', false, 'Error: ' + (err.reason || err.message.slice(0,100)));
+            }
+        }
+
+        async function requestFinancing() {
+            const assetId = document.getElementById('financeAssetId').value;
+            const amount = document.getElementById('financeAmount').value;
+            if (!assetId || !amount) { alert('Please enter asset ID and amount'); return; }
+            if (!contract) { alert('Please connect wallet first'); return; }
+            try {
+                logResult('financeResult', true, 'Requesting financing for asset #' + assetId + '...');
+                const amountWei = ethers.parseEther(amount);
+                const tx = await contract.requestFinancing(assetId, amountWei);
+                const receipt = await tx.wait();
+                // Contract emits AccountFlagged event if fraud detected, event listener will auto-refresh
+                // Contract emits FinancingRecorded event if success
+                if (receipt.status === 1) {
+                    logResult('financeResult', true, 'Request sent! Tx: ' + receipt.hash.slice(0,10) + '... Check event log for result.');
+                } else {
+                    logResult('financeResult', false, 'Transaction failed. Check events for details.');
+                }
+            } catch (err) {
+                const errMsg = err.reason || err.message.slice(0,100);
+                logResult('financeResult', false, 'Error: ' + errMsg);
+            }
+        }
+
+        async function repayAndRelease() {
+            const assetId = document.getElementById('repayAssetId').value;
+            const amount = document.getElementById('repayAmount').value;
+            if (!assetId || !amount) { alert('Please enter asset ID and amount'); return; }
+            if (!contract) { alert('Please connect wallet first'); return; }
+            try {
+                logResult('repayResult', true, 'Repaying ' + amount + ' ETH for asset #' + assetId + '...');
+                const amountWei = ethers.parseEther(amount);
+                const tx = await contract.repayAndRelease(assetId, { value: amountWei });
+                const receipt = await tx.wait();
+                logResult('repayResult', true, 'Lien released! Tx: ' + receipt.hash.slice(0,10) + '...');
+                addEventToLog('LienReleased', { assetId: assetId });
+            } catch (err) {
+                logResult('repayResult', false, 'Error: ' + (err.reason || err.message.slice(0,100)));
+            }
+        }
+
+        async function lookupAsset() {
+            const assetId = document.getElementById('lookupAssetId').value;
+            if (!assetId) { alert('Please enter an asset ID'); return; }
+            if (!contract) { alert('Please connect wallet first'); return; }
+            try {
+                const [owner, pledged, lender, lienAmount] = await contract.getAssetInfo(assetId);
+                const isFree = await contract.isAssetFree(assetId);
+                let html =
+                    '<strong>Asset #' + assetId + ':</strong><br>' +
+                    'Owner: ' + (owner === '0x0000000000000000000000000000000000000000' ? '(none)' : owner) + '<br>' +
+                    'Pledged: <span class="' + (pledged ? 'badge danger' : 'badge success') + '">' + (pledged ? 'YES' : 'NO') + '</span><br>' +
+                    'Free to Finance: <span class="' + (isFree ? 'badge success' : 'badge danger') + '">' + (isFree ? 'YES' : 'NO') + '</span><br>' +
+                    'Lender: ' + (lender === '0x0000000000000000000000000000000000000000' ? '(none)' : lender) + '<br>' +
+                    'Lien Amount: ' + (lienAmount ? ethers.formatEther(lienAmount) + ' ETH' : '0 ETH');
+
+                // Also fetch file info if registered
+                try {
+                    const [fileURI, fileHash, fileTs] = await contract.getFileInfo(assetId);
+                    if (fileHash && fileHash !== '') {
+                        html += '<hr style="border-color:#2d3748;margin:10px 0">' +
+                            '<strong>📄 File Record:</strong><br>' +
+                            'URI: <a href="#" onclick="return false" title="' + fileURI + '" style="color:#60a5fa">' + fileURI.slice(0, 40) + '...</a><br>' +
+                            'SHA-256: <code style="color:#4ade80;font-size:0.75rem">' + fileHash + '</code><br>' +
+                            'Registered: ' + (fileTs ? new Date(Number(fileTs) * 1000).toLocaleString() : '-');
+                    }
+                } catch (e) {
+                    // No file registered, ignore
+                }
+
+                document.getElementById('assetLookupResult').innerHTML = html;
+            } catch (err) {
+                document.getElementById('assetLookupResult').innerHTML = '<span style="color:#f87171">Asset not found or error: ' + err.message.slice(0,80) + '</span>';
+            }
+        }
+
+        async function getFlaggedAccounts() {
+            refreshFlaggedDisplay();
+        }
+
+        async function refreshFlaggedDisplay() {
+            if (!contract) return;
+            try {
+                const flagged = await contract.getFlaggedAccounts();
+                const el = document.getElementById('flaggedResult');
+                if (flagged.length === 0) {
+                    el.innerHTML = 'No flagged accounts - no fraud detected yet!';
+                } else {
+                    let html = '<strong>Flagged Accounts (' + flagged.length + '):</strong><br>';
+                    flagged.forEach((addr, i) => {
+                        html += (i+1) + '. ' + addr + '<br>';
+                    });
+                    el.innerHTML = html;
+                }
+            } catch (err) {
+                document.getElementById('flaggedResult').innerHTML = 'Error: ' + err.message.slice(0,80);
+            }
+        }
+
+        async function clearFlaggedAccounts() {
+            if (!contract) { alert('Please connect wallet first'); return; }
+            if (!confirm('Are you sure you want to clear all flagged accounts?')) return;
+            try {
+                logResult('flaggedResult', true, 'Clearing flagged accounts...');
+                const tx = await contract.clearFlaggedAccounts();
+                await tx.wait();
+                logResult('flaggedResult', true, 'All flagged accounts cleared!');
+                document.getElementById('flaggedResult').innerHTML = 'No flagged accounts - no fraud detected yet!';
+            } catch (err) {
+                logResult('flaggedResult', false, 'Error: ' + (err.reason || err.message.slice(0,100)));
+            }
+        }
+
+        async function startEventListener() {
+            if (!provider) { alert('Please connect wallet first'); return; }
+            if (eventListener) {
+                eventListener.remove();
+                eventListener = null;
+                document.getElementById('eventBtn').textContent = 'Start Listening';
+                return;
+            }
+            document.getElementById('eventBtn').textContent = 'Stop Listening';
+            const filter = { address: CONTRACT_ADDRESS };
+            eventListener = contract.on('*', (log) => {
+                const eventName = log.fragment.name;
+                const data = log.args;
+                addEventToLog(eventName, data);
+                if (eventName === 'AccountFlagged') {
+                    refreshFlaggedDisplay();
+                }
+            });
+            addEventToLog('System', 'Event listener started - waiting for events...');
+        }
+
+        // ---------------------------------------------------------------------------
+        // File Storage Functions
+        // ---------------------------------------------------------------------------
+        let currentFileHash = '';
+
+        async function computeHash() {
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+            if (!file) {
+                alert('Please select a file first');
+                return;
+            }
+            try {
+                const buffer = await file.arrayBuffer();
+                const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+                const hashArray = Array.from(new Uint8Array(hashBuffer));
+                currentFileHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+                document.getElementById('computedHash').textContent = currentFileHash;
+                document.getElementById('fileHashDisplay').style.display = 'block';
+                document.getElementById('regFileBtn').disabled = false;
+                logResult('fileResult', true, 'Hash computed: ' + currentFileHash.slice(0, 20) + '...');
+            } catch (err) {
+                logResult('fileResult', false, 'Hash error: ' + err.message);
+            }
+        }
+
+        async function registerFile() {
+            const assetId = document.getElementById('fileAssetId').value;
+            const uri = document.getElementById('fileURI').value;
+            if (!assetId) { alert('Please enter an asset ID'); return; }
+            if (!uri) { alert('Please enter an IPFS URI'); return; }
+            if (!contract) { alert('Please connect wallet first'); return; }
+            if (!currentFileHash) { alert('Please compute hash first'); return; }
+            try {
+                logResult('fileResult', true, 'Registering file for asset #' + assetId + '...');
+                const tx = await contract.registerFile(assetId, uri, currentFileHash);
+                const receipt = await tx.wait();
+                logResult('fileResult', true, 'File registered! Tx: ' + receipt.hash.slice(0, 10) + '...');
+                addEventToLog('FileRegistered', { assetId: assetId, fileHash: currentFileHash, fileURI: uri });
+            } catch (err) {
+                logResult('fileResult', false, 'Error: ' + (err.reason || err.message.slice(0, 100)));
+            }
+        }
+
+        async function verifyFileFromUI() {
+            const assetId = document.getElementById('verifyAssetId').value;
+            const providedHash = document.getElementById('verifyHashInput').value.trim();
+            if (!assetId || !providedHash) { alert('Please enter asset ID and hash to verify'); return; }
+            if (!contract) { alert('Please connect wallet first'); return; }
+            try {
+                const isValid = await contract.verifyFile(assetId, providedHash);
+                const resultEl = document.getElementById('verifyResult');
+                if (isValid) {
+                    resultEl.innerHTML = '<span style="color:#4ade80;font-weight:bold">PASS — Hash matches the on-chain record!</span>';
+                    resultEl.className = 'result-box success';
+                } else {
+                    resultEl.innerHTML = '<span style="color:#f87171;font-weight:bold">FAIL — Hash does NOT match!</span>';
+                    resultEl.className = 'result-box error';
+                }
+            } catch (err) {
+                document.getElementById('verifyResult').innerHTML = 'Error: ' + err.message.slice(0, 80);
+                document.getElementById('verifyResult').className = 'result-box error';
+            }
+        }
+    </script>
+</body>
+</html>

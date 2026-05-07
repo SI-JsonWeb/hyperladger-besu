@@ -1,0 +1,57 @@
+@startuml DoubleFinancingPreventer_Structure
+
+title DoubleFinancingPreventer - Structure Diagram
+
+package "State Variables" {
+    struct Asset {
+        owner: address
+        pledged: bool
+        lender: address
+        lienAmount: uint256
+    }
+
+    struct FileRecord {
+        fileURI: string
+        fileHash: string
+        timestamp: uint256
+    }
+
+    map assets : uint256 => Asset
+    map assetsByOwner : address => uint256[]
+    map assetFiles : uint256 => FileRecord
+    map flaggedAccounts : address => bool
+    list allFlaggedAccounts : address[]
+}
+
+package "Functions" {
+    class "registerAsset(uint256 assetId)" as f1 <<external>>
+    class "requestFinancing(uint256 assetId, uint256 amount)" as f2 <<external>>
+    class "repayAndRelease(uint256 assetId)" as f3 <<external, payable>>
+    class "clearFlaggedAccounts()" as f4 <<external>>
+    class "flagAccount(address account)" as f5 <<external>>
+    class "isAssetFree(uint256 assetId)" as f6 <<external, view>>
+    class "getAssetInfo(uint256 assetId)" as f7 <<external, view>>
+    class "getFlaggedAccounts()" as f8 <<external, view>>
+    class "getAssetsByOwner(address owner)" as f9 <<external, view>>
+    class "registerFile(uint256 assetId, string fileURI, string fileHash)" as f10 <<external>>
+    class "verifyFile(uint256 assetId, string providedHash)" as f11 <<external, view>>
+    class "getFileInfo(uint256 assetId)" as f12 <<external, view>>
+}
+
+package "Events" {
+    class "AssetRegistered(uint256, address)" as e1
+    class "FinancingRecorded(address, uint256, uint256, address)" as e2
+    class "LienReleased(uint256, address)" as e3
+    class "FraudAttemptDetected(address, uint256, string)" as e4
+    class "AccountFlagged(address, string)" as e5
+    class "FileRegistered(uint256, string, string)" as e6
+}
+
+f1 --> e1
+f2 --> e2
+f2 --> e4
+f2 --> e5
+f3 --> e3
+f10 --> e6
+
+@enduml

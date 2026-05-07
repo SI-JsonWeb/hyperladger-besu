@@ -1,0 +1,23 @@
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Caller
+    participant Contract as DoubleFinancingPreventer
+    participant State as assets mapping
+
+    Caller->>Contract: requestFinancing(assetId, amount)
+    Contract->>Contract: require(assets[assetId].owner != address(0))
+    Contract->>Contract: require(assets[assetId].owner == Caller)
+
+    alt Asset already pledged (fraud attempt)
+        Contract->>Contract: flaggedAccounts[Caller] = true
+        Contract->>Contract: allFlaggedAccounts.push(Caller)
+        Contract-->>Caller: AccountFlagged(Caller, "Double financing attempt")
+        Contract-->>Caller: FraudAttemptDetected(Caller, assetId, "Asset already pledged")
+    else Asset is free
+        Contract->>State: assets[assetId].pledged = true
+        Contract->>State: assets[assetId].lender = Caller
+        Contract->>State: assets[assetId].lienAmount = amount
+        Contract-->>Caller: FinancingRecorded(owner, assetId, amount, Caller)
+    end
+```
