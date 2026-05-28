@@ -31,7 +31,7 @@ async function main() {
     console.log('║         DOUBLE FINANCING PREVENTER - TESTING                          ║');
     console.log('╠═══════════════════════════════════════════════════════════════════════╣');
     console.log('║  SCENARIO 1: Normal Flow (Register → Finance → Repay)                  ║');
-    console.log('║  SCENARIO 2: Fraud Attempt (Double pledge should REJECT)             ║');
+    console.log('║  SCENARIO 2: Fraud Attempt (Double pledge should FLAG + IGNORE)      ║');
     console.log('╚═══════════════════════════════════════════════════════════════════════╝');
 
     const provider = new ethers.JsonRpcProvider(RPC_URL);
@@ -102,23 +102,28 @@ async function main() {
     await tx5.wait();
     logInfo('Result', 'First financing SUCCESS');
 
-    logStep(3, 'SECOND FINANCING ATTEMPT (should FAIL)');
-    try {
-        const tx6 = await contract.requestFinancing(200, ethers.parseEther('300'));
-        await tx6.wait();
-        logInfo('Result', 'ERROR - Fraud was NOT prevented!');
-        console.log('\n✗ SCENARIO 2 FAILED: Fraud was not prevented!\n');
-        process.exit(1);
-    } catch (error) {
-        logInfo('Result', 'FRAUD PREVENTED! Transaction reverted.');
-        logInfo('Error Message', error.reason || 'Asset already pledged');
-    }
+    logStep(3, 'SECOND FINANCING ATTEMPT (should FLAG + IGNORE)');
+    const tx6 = await contract.requestFinancing(200, ethers.parseEther('300'));
+    const receipt6 = await tx6.wait();
+    logInfo('Transaction Hash', receipt6.hash);
+    logInfo('Result', 'Fraud attempt recorded without changing existing lien');
 
     logStep(4, 'CHECK FRAUD ALERT - FLAGGED ACCOUNTS');
     const flagged = await contract.getFlaggedAccounts();
     logInfo('Flagged Accounts', flagged.length.toString());
     if (flagged.length > 0) {
         logInfo('First Flagged', flagged[0]);
+    }
+    const [, pledgedAfterFraud, , amountAfterFraud] = await contract.getAssetInfo(200);
+    if (!pledgedAfterFraud || amountAfterFraud !== ethers.parseEther('200')) {
+        logInfo('Result', 'ERROR - Existing lien was changed!');
+        console.log('\n✗ SCENARIO 2 FAILED: Existing lien changed after fraud attempt!\n');
+        process.exit(1);
+    }
+    if (flagged.length === 0) {
+        logInfo('Result', 'ERROR - Account was not flagged!');
+        console.log('\n✗ SCENARIO 2 FAILED: Fraud account was not flagged!\n');
+        process.exit(1);
     }
 
     console.log('\n✓ SCENARIO 2 PASSED: Fraud was detected and prevented!\n');

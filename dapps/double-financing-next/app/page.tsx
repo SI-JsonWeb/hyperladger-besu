@@ -36,6 +36,11 @@ function fromWei(value: string) {
   return fraction ? `${whole}.${fraction}` : whole.toString();
 }
 
+function truncateAddress(addr: string): string {
+  if (addr.length <= 10) return addr;
+  return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+}
+
 async function backend<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api/backend${path}`, {
     ...init,
@@ -47,6 +52,15 @@ async function backend<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(data?.message || data?.error || `Request failed with ${response.status}`);
   }
   return data as T;
+}
+
+function StatusIndicator({ ok, label }: { ok: boolean; label: string }) {
+  return (
+    <div className={`status-indicator ${ok ? 'online' : 'offline'}`}>
+      <span className="dot" />
+      <span>{label}</span>
+    </div>
+  );
 }
 
 function ResultBox({ result, children }: { result?: Result; children?: React.ReactNode }) {
@@ -78,7 +92,7 @@ export default function Home() {
   }, []);
 
   function appendEvent(message: string) {
-    setEvents((current) => [`${new Date().toLocaleTimeString()} - ${message}`, ...current].slice(0, 10));
+    setEvents((current) => [`${new Date().toLocaleTimeString()} — ${message}`, ...current].slice(0, 10));
   }
 
   async function run(action: () => Promise<string>) {
@@ -145,114 +159,305 @@ export default function Home() {
 
   return (
     <main className="shell">
+      {/* COMMAND HEADER */}
       <section className="hero">
-        <div>
-          <p className="eyebrow">Hyperledger Besu Demo</p>
+        <div className="hero-content">
+          <p className="eyebrow">Hyperledger Besu Protocol</p>
           <h1>Double Financing Preventer</h1>
-          <p className="subtitle">Next.js control panel for the REST backend that registers assets, records liens, detects duplicate financing, and verifies off-chain file hashes.</p>
+          <p className="subtitle">
+            Control center for registering asset liens, detecting duplicate financing attempts,
+            and verifying off-chain file hashes against on-chain records.
+          </p>
         </div>
-        <button onClick={checkHealth}>Check Backend</button>
-      </section>
-
-      <section className="status-card">
-        <div>
-          <span>Backend</span>
-          <strong className={health.ok ? 'good' : 'bad'}>{health.message}</strong>
-        </div>
-        <div>
-          <span>API Proxy</span>
-          <strong>/api/backend</strong>
-        </div>
-        <div>
-          <span>Writes</span>
-          <strong>Signed by backend</strong>
+        <div className="hero-status">
+          <StatusIndicator ok={health.ok} label={health.message} />
+          <StatusIndicator ok={true} label="API Proxy /api/backend" />
+          <StatusIndicator ok={true} label="Signed by backend" />
+          <button onClick={checkHealth} className="secondary" disabled={isPending}>
+            Refresh Status
+          </button>
         </div>
       </section>
 
-      <section className="grid two">
+      {/* MAIN GRID */}
+      <div className="grid two" style={{ marginTop: '1.25rem' }}>
+        {/* ASSET LOOKUP */}
         <form className="card wide" onSubmit={lookupAsset}>
           <h2>Asset Lookup</h2>
           <div className="row">
-            <input value={lookupId} onChange={(event) => setLookupId(event.target.value)} placeholder="Asset ID" min="1" type="number" />
-            <button disabled={isPending}>Lookup</button>
+            <input
+              value={lookupId}
+              onChange={(event) => setLookupId(event.target.value)}
+              placeholder="Asset ID"
+              min="1"
+              type="number"
+            />
+            <button disabled={isPending || !lookupId}>Lookup</button>
           </div>
           <div className="asset-panel">
             {asset ? (
               <>
-                <p><span>Owner</span><code>{asset.owner === zeroAddress ? '(none)' : asset.owner}</code></p>
-                <p><span>Status</span><b className={asset.pledged ? 'danger' : 'good'}>{asset.pledged ? 'Pledged' : 'Free'}</b></p>
-                <p><span>Lender</span><code>{asset.lender === zeroAddress ? '(none)' : asset.lender}</code></p>
-                <p><span>Lien</span><b>{fromWei(asset.lienAmountWei)} ETH</b></p>
-                {fileRecord ? (
+                <p>
+                  <span className="field-label">Owner</span>
+                  <span className="field-value">
+                    <code className="address">{asset.owner === zeroAddress ? '(none)' : asset.owner}</code>
+                  </span>
+                </p>
+                <p>
+                  <span className="field-label">Status</span>
+                  <span className={`field-value ${asset.pledged ? 'danger' : 'good'}`}>
+                    {asset.pledged ? '⟳ Pledged' : '◎ Free'}
+                  </span>
+                </p>
+                <p>
+                  <span className="field-label">Lender</span>
+                  <span className="field-value">
+                    <code className="address">{asset.lender === zeroAddress ? '(none)' : asset.lender}</code>
+                  </span>
+                </p>
+                <p>
+                  <span className="field-label">Lien Amount</span>
+                  <span className="field-value">{fromWei(asset.lienAmountWei)} ETH</span>
+                </p>
+                {fileRecord && (
                   <>
-                    <p><span>IPFS URI</span><code>{fileRecord.fileURI || '(none)'}</code></p>
-                    <p><span>File Hash</span><code>{fileRecord.fileHash}</code></p>
-                    <p><span>Registered</span><b>{fileRecord.timestamp ? new Date(Number(fileRecord.timestamp) * 1000).toLocaleString() : '-'}</b></p>
+                    <p>
+                      <span className="field-label">IPFS URI</span>
+                      <span className="field-value">
+                        <code className="address">{fileRecord.fileURI || '(none)'}</code>
+                      </span>
+                    </p>
+                    <p>
+                      <span className="field-label">File Hash</span>
+                      <span className="field-value">
+                        <code className="address">{fileRecord.fileHash}</code>
+                      </span>
+                    </p>
+                    <p>
+                      <span className="field-label">Registered</span>
+                      <span className="field-value">
+                        {fileRecord.timestamp
+                          ? new Date(Number(fileRecord.timestamp) * 1000).toLocaleString()
+                          : '-'}
+                      </span>
+                    </p>
                   </>
-                ) : null}
+                )}
               </>
-            ) : 'Enter an asset ID to inspect its financing state.'}
+            ) : (
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+                Enter an asset ID to inspect its financing state.
+              </p>
+            )}
           </div>
         </form>
 
+        {/* FRAUD ALERTS */}
         <div className="card">
           <h2>Fraud Alerts</h2>
-          <div className="button-row">
-            <button onClick={refreshFlagged} disabled={isPending}>Refresh Flagged Accounts</button>
-            <button className="danger-button" onClick={clearFlaggedAccounts} disabled={isPending || flagged.length === 0}>Clear Flagged Accounts</button>
+          <div className="button-row" style={{ marginTop: 0 }}>
+            <button onClick={refreshFlagged} disabled={isPending} className="secondary">
+              Refresh
+            </button>
+            <button
+              className="danger-button"
+              onClick={clearFlaggedAccounts}
+              disabled={isPending || flagged.length === 0}
+            >
+              Clear All
+            </button>
           </div>
-          <div className="list">{flagged.length ? flagged.map((account) => <code key={account}>{account}</code>) : <span>No flagged accounts loaded.</span>}</div>
+          <div className="list">
+            {flagged.length ? (
+              flagged.map((account) => (
+                <code key={account}>{account}</code>
+              ))
+            ) : (
+              <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+                No flagged accounts detected.
+              </span>
+            )}
+          </div>
         </div>
-      </section>
+      </div>
 
+      {/* ASSET OPERATIONS */}
       <section className="grid three">
-        <form className="card" onSubmit={(event) => { event.preventDefault(); void run(async () => { await backend('/assets', { method: 'POST', body: JSON.stringify({ assetId: registerId }) }); return `Registered asset #${registerId}`; }); }}>
+        <form
+          className="card"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void run(async () => {
+              await backend('/assets', { method: 'POST', body: JSON.stringify({ assetId: registerId }) });
+              return `Registered asset #${registerId}`;
+            });
+          }}
+        >
           <h2>Register Asset</h2>
-          <input value={registerId} onChange={(event) => setRegisterId(event.target.value)} placeholder="Asset ID" min="1" type="number" required />
-          <button disabled={isPending}>Register</button>
+          <input
+            value={registerId}
+            onChange={(event) => setRegisterId(event.target.value)}
+            placeholder="Asset ID"
+            min="1"
+            type="number"
+            required
+          />
+          <button disabled={isPending || !registerId}>Register</button>
         </form>
 
-        <form className="card" onSubmit={(event) => { event.preventDefault(); void run(async () => { await backend(`/assets/${financeId}/financing`, { method: 'POST', body: JSON.stringify({ amountWei: toWei(financeAmount) }) }); return `Requested ${financeAmount} ETH financing for asset #${financeId}`; }); }}>
+        <form
+          className="card"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void run(async () => {
+              await backend(`/assets/${financeId}/financing`, {
+                method: 'POST',
+                body: JSON.stringify({ amountWei: toWei(financeAmount) }),
+              });
+              return `Requested ${financeAmount} ETH financing for asset #${financeId}`;
+            });
+          }}
+        >
           <h2>Request Financing</h2>
-          <input value={financeId} onChange={(event) => setFinanceId(event.target.value)} placeholder="Asset ID" min="1" type="number" required />
-          <input value={financeAmount} onChange={(event) => setFinanceAmount(event.target.value)} placeholder="Amount in ETH" min="0" step="0.01" type="number" required />
-          <button disabled={isPending}>Pledge Asset</button>
+          <input
+            value={financeId}
+            onChange={(event) => setFinanceId(event.target.value)}
+            placeholder="Asset ID"
+            min="1"
+            type="number"
+            required
+          />
+          <input
+            value={financeAmount}
+            onChange={(event) => setFinanceAmount(event.target.value)}
+            placeholder="Amount in ETH"
+            min="0"
+            step="0.01"
+            type="number"
+            required
+          />
+          <button disabled={isPending || !financeId || !financeAmount}>Pledge Asset</button>
         </form>
 
-        <form className="card" onSubmit={(event) => { event.preventDefault(); void run(async () => { await backend(`/assets/${repayId}/repay`, { method: 'POST', body: JSON.stringify({ amountWei: toWei(repayAmount) }) }); return `Repaid ${repayAmount} ETH and released asset #${repayId}`; }); }}>
+        <form
+          className="card"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void run(async () => {
+              await backend(`/assets/${repayId}/repay`, {
+                method: 'POST',
+                body: JSON.stringify({ amountWei: toWei(repayAmount) }),
+              });
+              return `Repaid ${repayAmount} ETH and released asset #${repayId}`;
+            });
+          }}
+        >
           <h2>Repay Lien</h2>
-          <input value={repayId} onChange={(event) => setRepayId(event.target.value)} placeholder="Asset ID" min="1" type="number" required />
-          <input value={repayAmount} onChange={(event) => setRepayAmount(event.target.value)} placeholder="Amount in ETH" min="0" step="0.01" type="number" required />
-          <button disabled={isPending}>Repay & Release</button>
+          <input
+            value={repayId}
+            onChange={(event) => setRepayId(event.target.value)}
+            placeholder="Asset ID"
+            min="1"
+            type="number"
+            required
+          />
+          <input
+            value={repayAmount}
+            onChange={(event) => setRepayAmount(event.target.value)}
+            placeholder="Amount in ETH"
+            min="0"
+            step="0.01"
+            type="number"
+            required
+          />
+          <button disabled={isPending || !repayId || !repayAmount}>Repay & Release</button>
         </form>
       </section>
 
+      {/* FILE OPERATIONS */}
       <section className="grid two">
-        <form className="card" onSubmit={(event) => { event.preventDefault(); void run(async () => { await backend(`/assets/${fileAssetId}/files`, { method: 'POST', body: JSON.stringify({ fileURI, fileHash }) }); return `Registered file hash for asset #${fileAssetId}`; }); }}>
+        <form
+          className="card"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void run(async () => {
+              await backend(`/assets/${fileAssetId}/files`, {
+                method: 'POST',
+                body: JSON.stringify({ fileURI, fileHash }),
+              });
+              return `Registered file hash for asset #${fileAssetId}`;
+            });
+          }}
+        >
           <h2>Register File Hash</h2>
-          <input value={fileAssetId} onChange={(event) => setFileAssetId(event.target.value)} placeholder="Asset ID" min="1" type="number" required />
+          <input
+            value={fileAssetId}
+            onChange={(event) => setFileAssetId(event.target.value)}
+            placeholder="Asset ID"
+            min="1"
+            type="number"
+            required
+          />
           <input type="file" onChange={(event) => void hashSelectedFile(event.target.files?.[0])} />
-          <input value={fileURI} onChange={(event) => setFileURI(event.target.value)} placeholder="ipfs://..." required />
-          {fileHash ? <code className="hash">{fileHash}</code> : <span className="hint">Select a file to compute SHA-256.</span>}
-          <button disabled={isPending || !fileHash}>Register File</button>
+          <input
+            value={fileURI}
+            onChange={(event) => setFileURI(event.target.value)}
+            placeholder="ipfs://..."
+            required
+          />
+          {fileHash ? (
+            <code className="hash">{fileHash}</code>
+          ) : (
+            <span className="hint">Select a file to compute SHA-256 hash</span>
+          )}
+          <button disabled={isPending || !fileHash || !fileURI}>Register File</button>
         </form>
 
-        <form className="card" onSubmit={(event) => { event.preventDefault(); void run(async () => { const data = await backend<{ valid: boolean }>(`/assets/${verifyAssetId}/files/verify`, { method: 'POST', body: JSON.stringify({ fileHash: verifyHash }) }); return data.valid ? 'File hash matches on-chain record' : 'File hash does not match'; }); }}>
+        <form
+          className="card"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void run(async () => {
+              const data = await backend<{ valid: boolean }>(`/assets/${verifyAssetId}/files/verify`, {
+                method: 'POST',
+                body: JSON.stringify({ fileHash: verifyHash }),
+              });
+              return data.valid ? '✓ File hash matches on-chain record' : '✗ File hash does not match';
+            });
+          }}
+        >
           <h2>Verify File</h2>
-          <input value={verifyAssetId} onChange={(event) => setVerifyAssetId(event.target.value)} placeholder="Asset ID" min="1" type="number" required />
-          <input value={verifyHash} onChange={(event) => setVerifyHash(event.target.value)} placeholder="SHA-256 hash" required />
-          <button disabled={isPending}>Verify Hash</button>
+          <input
+            value={verifyAssetId}
+            onChange={(event) => setVerifyAssetId(event.target.value)}
+            placeholder="Asset ID"
+            min="1"
+            type="number"
+            required
+          />
+          <input
+            value={verifyHash}
+            onChange={(event) => setVerifyHash(event.target.value)}
+            placeholder="SHA-256 hash"
+            required
+          />
+          <button disabled={isPending || !verifyAssetId || !verifyHash}>Verify Hash</button>
         </form>
       </section>
 
+      {/* RESULT + ACTIVITY */}
       <section className="grid two">
         <div className="card">
           <h2>Latest Result</h2>
           <ResultBox result={result}>No operation yet.</ResultBox>
         </div>
         <div className="card">
-          <h2>Activity</h2>
-          <div className="event-log">{events.map((event) => <p key={event}>{event}</p>)}</div>
+          <h2>Activity Log</h2>
+          <div className="event-log">
+            {events.map((event, i) => (
+              <p key={`${event}-${i}`}>{event}</p>
+            ))}
+          </div>
         </div>
       </section>
     </main>
