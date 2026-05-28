@@ -1,0 +1,1 @@
+export const ASSET_CONTRACT_PORT = Symbol('ASSET_CONTRACT_PORT');

@@ -1,8 +1,8 @@
 {
   "network": "unknown",
   "chainId": "1337",
-  "contractAddress": "0x594e68f223a390500467346151C9C7E6f9C1faeA",
+  "contractAddress": "0x42699A7612A82f1d9C36148af9C77354759b210b",
   "deployer": "0xFE3B557E8Fb62b89F4916B721be55cEb828dBd73",
-  "blockNumber": "11266",
-  "timestamp": "2026-05-07T09:03:47.056Z"
+  "blockNumber": "206",
+  "timestamp": "2026-05-26T03:53:31.582Z"
 }

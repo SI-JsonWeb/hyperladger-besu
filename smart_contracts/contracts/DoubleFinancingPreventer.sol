@@ -12,6 +12,14 @@ contract DoubleFinancingPreventer {
     mapping(uint256 => Asset) public assets;
     mapping(address => uint256[]) public assetsByOwner;
     mapping(address => bool) public flaggedAccounts;
+
+    struct FileRecord {
+        string fileURI;
+        string fileHash;
+        uint256 timestamp;
+    }
+    mapping(uint256 => FileRecord) public assetFiles;
+
     address[] public allFlaggedAccounts;
 
     event AssetRegistered(uint256 indexed assetId, address indexed owner);
@@ -28,6 +36,7 @@ contract DoubleFinancingPreventer {
         string reason
     );
     event AccountFlagged(address indexed account, string reason);
+    event FileRegistered(uint256 indexed assetId, string fileHash, string fileURI);
 
     function registerAsset(uint256 assetId) external {
         require(assetId > 0, "Invalid asset ID");
@@ -144,6 +153,50 @@ contract DoubleFinancingPreventer {
         address owner
     ) external view returns (uint256[] memory) {
         return assetsByOwner[owner];
+    }
+
+    function registerFile(
+        uint256 assetId,
+        string memory fileURI,
+        string memory fileHash
+    ) external {
+        Asset storage asset = assets[assetId];
+        require(asset.owner != address(0), "Asset not found");
+        require(asset.owner == msg.sender, "Not the asset owner");
+
+        assetFiles[assetId] = FileRecord({
+            fileURI: fileURI,
+            fileHash: fileHash,
+            timestamp: block.timestamp
+        });
+
+        emit FileRegistered(assetId, fileHash, fileURI);
+    }
+
+    function verifyFile(
+        uint256 assetId,
+        string calldata providedHash
+    ) external view returns (bool) {
+        FileRecord storage record = assetFiles[assetId];
+        require(bytes(record.fileHash).length > 0, "No file registered for this asset");
+        return
+            keccak256(abi.encodePacked(record.fileHash)) ==
+            keccak256(abi.encodePacked(providedHash));
+    }
+
+    function getFileInfo(
+        uint256 assetId
+    )
+        external
+        view
+        returns (
+            string memory fileURI,
+            string memory fileHash,
+            uint256 timestamp
+        )
+    {
+        FileRecord storage record = assetFiles[assetId];
+        return (record.fileURI, record.fileHash, record.timestamp);
     }
 }
 
