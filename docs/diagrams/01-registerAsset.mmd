@@ -4,7 +4,6 @@ sequenceDiagram
     participant Caller
     participant Contract as DoubleFinancingPreventer
     participant State as assets mapping
-    participant FileStore as assetFiles mapping
 
     Caller->>Contract: registerAsset(assetId)
     Contract->>Contract: require(assetId > 0)

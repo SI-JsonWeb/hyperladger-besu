@@ -10,10 +10,13 @@ sequenceDiagram
     Contract->>Contract: require(assets[assetId].owner == Caller)
 
     alt Asset already pledged (fraud attempt)
-        Contract->>Contract: flaggedAccounts[Caller] = true
-        Contract->>Contract: allFlaggedAccounts.push(Caller)
-        Contract-->>Caller: AccountFlagged(Caller, "Double financing attempt")
-        Contract-->>Caller: FraudAttemptDetected(Caller, assetId, "Asset already pledged")
+        opt Caller is not already flagged
+            Contract->>Contract: flaggedAccounts[Caller] = true
+            Contract->>Contract: allFlaggedAccounts.push(Caller)
+            Contract-->>Caller: AccountFlagged(Caller, "Double financing attempt")
+        end
+        Contract-->>Caller: FraudAttemptDetected(Caller, assetId, "Asset already pledged to another lender")
+        Contract-->>Caller: return without changing the lien
     else Asset is free
         Contract->>State: assets[assetId].pledged = true
         Contract->>State: assets[assetId].lender = Caller
