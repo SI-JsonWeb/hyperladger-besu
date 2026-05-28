@@ -1,0 +1,9 @@
+backend/dist/
+backend/node_modules/
+logs/
+
+# Local dev-network secrets and generated keys.
+config/besu/.env
+config/ethsigner/key
+config/ethsigner/password
+config/nodes/
