@@ -1,4 +1,5 @@
 backend/dist/
+backend/.env
 backend/node_modules/
 logs/
 

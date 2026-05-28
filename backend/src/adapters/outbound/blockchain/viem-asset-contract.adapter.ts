@@ -92,6 +92,17 @@ export class ViemAssetContractAdapter implements AssetContractPort {
     return accounts;
   }
 
+  async clearFlaggedAccounts(): Promise<TransactionResult> {
+    const txHash = await this.walletClient.writeContract({
+      account: this.account,
+      address: this.address,
+      abi: this.abi,
+      chain: this.chain,
+      functionName: 'clearFlaggedAccounts',
+    });
+    return this.wait(txHash);
+  }
+
   async registerFile(assetId: bigint, fileURI: string, fileHash: string): Promise<TransactionResult> {
     const txHash = await this.walletClient.writeContract({
       account: this.account,

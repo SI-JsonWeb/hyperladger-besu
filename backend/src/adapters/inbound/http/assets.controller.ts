@@ -52,6 +52,13 @@ export class AssetsController {
     return this.forward(() => this.assets.getFlaggedAccounts());
   }
 
+  @Post('accounts/flagged/clear')
+  @UseGuards(ApiKeyGuard)
+  @HttpCode(202)
+  clearFlaggedAccounts() {
+    return this.forward(() => this.assets.clearFlaggedAccounts());
+  }
+
   @Get('assets/:id/files')
   getFile(@Param('id', ParsePositiveBigIntPipe) id: bigint) {
     return this.forward(() => this.assets.getFileInfo(id));

@@ -33,6 +33,10 @@ export class AssetUseCasesService {
     return { accounts: await this.contract.getFlaggedAccounts() };
   }
 
+  clearFlaggedAccounts() {
+    return this.contract.clearFlaggedAccounts();
+  }
+
   registerFile(assetId: bigint, fileURI: string, fileHash: string) {
     return this.contract.registerFile(assetId, fileURI, fileHash);
   }

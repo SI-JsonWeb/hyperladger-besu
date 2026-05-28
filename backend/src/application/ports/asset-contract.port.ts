@@ -9,6 +9,7 @@ export interface AssetContractPort {
   requestFinancing(assetId: bigint, amount: bigint): Promise<TransactionResult>;
   repayAndRelease(assetId: bigint, amount: bigint): Promise<TransactionResult>;
   getFlaggedAccounts(): Promise<string[]>;
+  clearFlaggedAccounts(): Promise<TransactionResult>;
   registerFile(assetId: bigint, fileURI: string, fileHash: string): Promise<TransactionResult>;
   verifyFile(assetId: bigint, fileHash: string): Promise<boolean>;
   getFileInfo(assetId: bigint): Promise<FileRecord>;
