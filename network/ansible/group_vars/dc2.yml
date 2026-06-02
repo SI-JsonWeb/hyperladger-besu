@@ -1,0 +1,8 @@
+dc: dc2
+nodes:
+  - name: dc2-node3
+    rpc_port: 8547
+    p2p_port: 30305
+  - name: dc2-node4
+    rpc_port: 8548
+    p2p_port: 30306

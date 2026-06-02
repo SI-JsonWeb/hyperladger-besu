@@ -1,0 +1,14 @@
+all:
+  children:
+    dc1:
+      hosts:
+        dc1-server:
+          ansible_host: localhost
+          ansible_connection: local
+          compose_dir: /opt/besu/dc1
+    dc2:
+      hosts:
+        dc2-server:
+          ansible_host: localhost
+          ansible_connection: local
+          compose_dir: /opt/besu/dc2

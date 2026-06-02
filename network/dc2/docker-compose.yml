@@ -1,0 +1,79 @@
+services:
+  dc2-node3:
+    image: hyperledger/besu:24.1.0
+    container_name: besu-dc2-node3
+    user: root
+    ports:
+      - "8547:8545"
+    volumes:
+      - ./dc2-node3/keys:/opt/besu/keys
+      - ./genesis.json:/opt/besu/genesis.json
+      - dc2-node3-data:/opt/besu/data
+    command: >
+      --genesis-file=/opt/besu/genesis.json
+      --node-private-key-file=/opt/besu/keys/key
+      --data-path=/opt/besu/data
+      --p2p-host=0.0.0.0
+      --p2p-port=30303
+      --bootnodes=enode://b22cbd1e3a9945cbe8b0d336ae98779e2f978ffa8c723429666be1ab7bc0bb98ebc6e055b8d9b48665ed4d04e81b886fa512005a3147b6d8b4cd1050f3f30a3f@172.22.0.2:30303
+      --rpc-http-enabled
+      --rpc-http-api=ETH,NET,QBFT,ADMIN,WEB3
+      --rpc-http-host=0.0.0.0
+      --rpc-http-port=8545
+      --rpc-http-cors-origins=all
+      --host-allowlist=*
+      --min-gas-price=0
+      --tx-pool-min-gas-price=0
+    networks:
+      besu-internal:
+        ipv4_address: 172.21.0.2
+      besu-shared:
+        ipv4_address: 172.22.0.4
+
+  dc2-node4:
+    image: hyperledger/besu:24.1.0
+    container_name: besu-dc2-node4
+    user: root
+    depends_on:
+      - dc2-node3
+    ports:
+      - "8548:8545"
+    volumes:
+      - ./dc2-node4/keys:/opt/besu/keys
+      - ./genesis.json:/opt/besu/genesis.json
+      - dc2-node4-data:/opt/besu/data
+    command: >
+      --genesis-file=/opt/besu/genesis.json
+      --node-private-key-file=/opt/besu/keys/key
+      --data-path=/opt/besu/data
+      --p2p-host=0.0.0.0
+      --p2p-port=30303
+      --bootnodes=enode://b22cbd1e3a9945cbe8b0d336ae98779e2f978ffa8c723429666be1ab7bc0bb98ebc6e055b8d9b48665ed4d04e81b886fa512005a3147b6d8b4cd1050f3f30a3f@172.22.0.2:30303
+      --rpc-http-enabled
+      --rpc-http-api=ETH,NET,QBFT,ADMIN,WEB3
+      --rpc-http-host=0.0.0.0
+      --rpc-http-port=8545
+      --rpc-http-cors-origins=all
+      --host-allowlist=*
+      --min-gas-price=0
+      --tx-pool-min-gas-price=0
+    networks:
+      besu-internal:
+        ipv4_address: 172.21.0.3
+      besu-shared:
+        ipv4_address: 172.22.0.5
+
+volumes:
+  dc1-node1-data:
+  dc1-node2-data:
+  dc2-node3-data:
+  dc2-node4-data:
+
+networks:
+  besu-internal:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16
+  besu-shared:
+    external: true

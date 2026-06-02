@@ -1,0 +1,16 @@
+---
+- name: Deploy DC1
+  hosts: dc1
+  tasks:
+    - name: Start DC1 containers
+      command: docker compose up -d
+      args:
+        chdir: "{{ compose_dir }}"
+
+- name: Deploy DC2
+  hosts: dc2
+  tasks:
+    - name: Start DC2 containers
+      command: docker compose up -d
+      args:
+        chdir: "{{ compose_dir }}"
