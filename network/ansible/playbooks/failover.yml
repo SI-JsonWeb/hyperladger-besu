@@ -28,7 +28,13 @@
     - name: Check if recovery-node5 already running
       command: docker inspect besu-recovery-node5
       register: node5_exists
-      ignore_errors: true
+      failed_when: false
+      changed_when: false
+
+    - name: Stop DC1 validators before starting recovery validators
+      command: docker stop besu-dc1-node1 besu-dc1-node2
+      failed_when: false
+      when: hostvars['dc1-server']['dc1_failed'] | bool
 
     - name: Deploy recovery node5 in DC2 (uses dc1-node1 keys)
       command: >
@@ -39,17 +45,18 @@
         --user root
         -p 8549:8545
         -p 30307:30303
-        -v /mnt/d/OneDrive - National ITMX Company/Code/node-tolerant/network/dc1/dc1-node1/keys:/opt/besu/keys
-        -v /mnt/d/OneDrive - National ITMX Company/Code/node-tolerant/network/dc2/genesis.json:/opt/besu/genesis.json
+        -v /home/webbacillus/10_projects/05_hyperladger_besu/hyperladger-besu/network/dc1/dc1-node1/keys:/opt/besu/keys
+        -v /home/webbacillus/10_projects/05_hyperladger_besu/hyperladger-besu/network/dc2/genesis.json:/opt/besu/genesis.json
+        -v /home/webbacillus/10_projects/05_hyperladger_besu/hyperladger-besu/network/static-peers/recovery-node5/static-nodes.json:/opt/besu/static-nodes.json:ro
         hyperledger/besu:24.1.0
         --genesis-file=/opt/besu/genesis.json
         --node-private-key-file=/opt/besu/keys/key
         --data-path=/opt/besu/data
-        --p2p-host=0.0.0.0
+        --p2p-host=172.22.0.6
         --p2p-port=30303
-        --bootnodes=enode://ca3ae5014ad6d31cba2338e07c05248752578e95d0efd7bd19b128c1fdb3c8b20544d53789826618391518ea88e71f6d9e64124a9350a8d833c43bc5e8bf89da@172.22.0.4:30303
+        --static-nodes-file=/opt/besu/static-nodes.json
         --rpc-http-enabled
-        --rpc-http-api=ETH,NET,QBFT,ADMIN,WEB3
+        --rpc-http-api=ETH,NET,QBFT,WEB3
         --rpc-http-host=0.0.0.0
         --rpc-http-port=8545
         --rpc-http-cors-origins=all
@@ -63,7 +70,8 @@
     - name: Check if recovery-node6 already running
       command: docker inspect besu-recovery-node6
       register: node6_exists
-      ignore_errors: true
+      failed_when: false
+      changed_when: false
 
     - name: Deploy recovery node6 in DC2 (uses dc1-node2 keys)
       command: >
@@ -74,17 +82,18 @@
         --user root
         -p 8550:8545
         -p 30308:30303
-        -v /mnt/d/OneDrive - National ITMX Company/Code/node-tolerant/network/dc1/dc1-node2/keys:/opt/besu/keys
-        -v /mnt/d/OneDrive - National ITMX Company/Code/node-tolerant/network/dc2/genesis.json:/opt/besu/genesis.json
+        -v /home/webbacillus/10_projects/05_hyperladger_besu/hyperladger-besu/network/dc1/dc1-node2/keys:/opt/besu/keys
+        -v /home/webbacillus/10_projects/05_hyperladger_besu/hyperladger-besu/network/dc2/genesis.json:/opt/besu/genesis.json
+        -v /home/webbacillus/10_projects/05_hyperladger_besu/hyperladger-besu/network/static-peers/recovery-node6/static-nodes.json:/opt/besu/static-nodes.json:ro
         hyperledger/besu:24.1.0
         --genesis-file=/opt/besu/genesis.json
         --node-private-key-file=/opt/besu/keys/key
         --data-path=/opt/besu/data
-        --p2p-host=0.0.0.0
+        --p2p-host=172.22.0.7
         --p2p-port=30303
-        --bootnodes=enode://ca3ae5014ad6d31cba2338e07c05248752578e95d0efd7bd19b128c1fdb3c8b20544d53789826618391518ea88e71f6d9e64124a9350a8d833c43bc5e8bf89da@172.22.0.4:30303
+        --static-nodes-file=/opt/besu/static-nodes.json
         --rpc-http-enabled
-        --rpc-http-api=ETH,NET,QBFT,ADMIN,WEB3
+        --rpc-http-api=ETH,NET,QBFT,WEB3
         --rpc-http-host=0.0.0.0
         --rpc-http-port=8545
         --rpc-http-cors-origins=all
@@ -102,6 +111,26 @@
         create: true
       when: hostvars['dc1-server']['dc1_failed'] | bool
 
+    - name: Wait for recovery RPC endpoints
+      uri:
+        url: "http://localhost:{{ item }}"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: "net_peerCount"
+          params: []
+          id: 1
+        timeout: 5
+      loop:
+        - 8549
+        - 8550
+      register: recovery_rpc
+      retries: 10
+      delay: 3
+      until: recovery_rpc is not failed
+      when: hostvars['dc1-server']['dc1_failed'] | bool
+
 - name: Cleanup recovery nodes if DC1 recovered
   hosts: dc2
   gather_facts: false
@@ -109,16 +138,52 @@
     - name: Stop and remove recovery-node5 if DC1 is back
       command: docker rm -f besu-recovery-node5
       ignore_errors: true
-      when: not hostvars['dc1-server']['dc1_failed'] | bool
+      when:
+        - not hostvars['dc1-server']['dc1_failed'] | bool
+        - node5_exists.rc == 0
 
     - name: Stop and remove recovery-node6 if DC1 is back
       command: docker rm -f besu-recovery-node6
       ignore_errors: true
-      when: not hostvars['dc1-server']['dc1_failed'] | bool
+      when:
+        - not hostvars['dc1-server']['dc1_failed'] | bool
+        - node6_exists.rc == 0
+
+    - name: Restart validators after recovery handback
+      command: docker restart besu-dc1-node1 besu-dc1-node2 besu-dc2-node3 besu-dc2-node4
+      when:
+        - not hostvars['dc1-server']['dc1_failed'] | bool
+        - node5_exists.rc == 0 or node6_exists.rc == 0
+
+    - name: Wait for validator RPC endpoints after handback
+      uri:
+        url: "http://localhost:{{ item }}"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: "net_peerCount"
+          params: []
+          id: 1
+        timeout: 5
+      loop:
+        - 8545
+        - 8546
+        - 8547
+        - 8548
+      register: handback_rpc
+      retries: 12
+      delay: 5
+      until: handback_rpc is not failed
+      when:
+        - not hostvars['dc1-server']['dc1_failed'] | bool
+        - node5_exists.rc == 0 or node6_exists.rc == 0
 
     - name: Log DC1 recovery
       lineinfile:
         path: /tmp/besu-failover.log
         line: "{{ lookup('pipe', 'date --iso-8601=seconds') }} - DC1 recovered, recovery nodes removed from DC2"
         create: true
-      when: not hostvars['dc1-server']['dc1_failed'] | bool
+      when:
+        - not hostvars['dc1-server']['dc1_failed'] | bool
+        - node5_exists.rc == 0 or node6_exists.rc == 0

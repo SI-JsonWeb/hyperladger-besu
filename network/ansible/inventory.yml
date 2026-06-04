@@ -5,10 +5,10 @@ all:
         dc1-server:
           ansible_host: localhost
           ansible_connection: local
-          compose_dir: /opt/besu/dc1
+          compose_dir: "{{ inventory_dir }}/../dc1"
     dc2:
       hosts:
         dc2-server:
           ansible_host: localhost
           ansible_connection: local
-          compose_dir: /opt/besu/dc2
+          compose_dir: "{{ inventory_dir }}/../dc2"
