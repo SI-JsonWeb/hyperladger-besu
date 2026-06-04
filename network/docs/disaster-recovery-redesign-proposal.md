@@ -146,7 +146,7 @@ That keeps repeated cron runs idempotent while DC1 remains down.
 
 ## Failback Flow
 
-When DC1 RPC on `localhost:8545` responds and `A3` or `A4` is in validator mode:
+When both DC1 validator RPC endpoints respond and `A3` or `A4` is in validator mode:
 
 1. Remove `A3` and `A4` validator-mode containers.
 2. Start `V1` and `V2` through the DC1 Docker Compose file.
@@ -161,6 +161,8 @@ besu.dr.mode=archive
 ```
 
 Temporary downtime during failback is acceptable in this lab.
+
+Partial DC1 recovery is not enough for failback. If only one DC1 validator comes back, the controller keeps failover active and fences both DC1 validators. This avoids a duplicate validator key, for example `besu-dc1-node2` running at the same time as `besu-dc2-archive4` using the `V2` key.
 
 ## Diagram
 

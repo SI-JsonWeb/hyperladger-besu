@@ -128,12 +128,14 @@ Failover flow:
 
 Failback flow:
 
-1. Detect DC1 RPC is back.
+1. Detect both DC1 validator RPC endpoints are back.
 2. Remove validator-mode `A3` and `A4` containers.
 3. Start `V1` and `V2` through DC1 Docker Compose.
 4. Start `A3` and `A4` through DC2 Docker Compose so they return to archive/read mode.
 5. Wait for RPC endpoints.
 6. Log the handback event.
+
+Partial DC1 recovery is treated as still failed. For example, if `V2` wakes up but `V1` is still down, the controller keeps failover mode active and stops both DC1 validators. This prevents `V2` and `A4-as-V2` from running with the same validator key at the same time.
 
 The mode labels are:
 

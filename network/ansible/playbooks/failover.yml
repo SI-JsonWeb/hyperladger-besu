@@ -17,9 +17,23 @@
       register: dc1_health
       ignore_errors: true
 
+    - name: Check dc1-node2 RPC
+      uri:
+        url: "http://localhost:8546"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          method: "eth_blockNumber"
+          params: []
+          id: 1
+        timeout: 5
+      register: dc1_node2_health
+      ignore_errors: true
+
     - name: Set DC1 failed fact
       set_fact:
-        dc1_failed: "{{ dc1_health.failed | bool }}"
+        dc1_failed: "{{ dc1_health.failed | bool or dc1_node2_health.failed | bool }}"
 
 - name: Inspect DC2 archive standby mode
   hosts: dc2
@@ -46,9 +60,7 @@
     - name: Stop DC1 validators before promoting archive nodes
       command: docker stop besu-dc1-node1 besu-dc1-node2
       failed_when: false
-      when:
-        - hostvars['dc1-server']['dc1_failed'] | bool
-        - archive3_mode.stdout != 'validator' or archive4_mode.stdout != 'validator'
+      when: hostvars['dc1-server']['dc1_failed'] | bool
 
     - name: Remove dc2-archive3 archive container before validator promotion
       command: docker rm -f besu-dc2-archive3

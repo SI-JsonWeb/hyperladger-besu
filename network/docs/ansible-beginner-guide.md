@@ -229,7 +229,7 @@ Archive nodes use `--sync-mode=FULL` and `--data-storage-format=FOREST` so they 
 
 Failback means DC1 has returned and the network should move back to the normal four-validator topology.
 
-The playbook detects DC1 recovery when `http://localhost:8545` responds again.
+The playbook detects DC1 recovery when both validator RPC endpoints respond again: `http://localhost:8545` for `V1` and `http://localhost:8546` for `V2`.
 
 When DC1 is healthy and `A3` or `A4` is in validator mode, the playbook:
 
@@ -241,6 +241,8 @@ When DC1 is healthy and `A3` or `A4` is in validator mode, the playbook:
 - writes a recovery log entry
 
 The handback order is important because DC1 may be restarted while `A3` and `A4` are still using the same validator keys. That duplicate-validator overlap can leave QBFT round state stuck. The playbook removes promoted `A3` and `A4` before returning them to archive mode.
+
+If only one DC1 validator wakes up, the playbook still treats DC1 as failed. It stops both DC1 validators so the promoted DC2 archive validator does not share the same key with a partially recovered DC1 validator.
 
 ## Mermaid Diagram
 
