@@ -66,9 +66,89 @@ services:
       besu-shared:
         ipv4_address: 172.22.0.3
 
+  dc1-archive1:
+    image: hyperledger/besu:24.1.0
+    container_name: besu-dc1-archive1
+    user: root
+    labels:
+      besu.dr.mode: archive
+    depends_on:
+      - dc1-node1
+      - dc1-node2
+    ports:
+      - "8551:8545"
+    volumes:
+      - ./dc1-archive1/keys:/opt/besu/keys
+      - ./genesis.json:/opt/besu/genesis.json
+      - ../static-peers/dc1-archive1/static-nodes.json:/opt/besu/static-nodes.json:ro
+      - dc1-archive1-data:/opt/besu/data
+    command: >
+      --genesis-file=/opt/besu/genesis.json
+      --node-private-key-file=/opt/besu/keys/key
+      --data-path=/opt/besu/data
+      --sync-mode=FULL
+      --data-storage-format=FOREST
+      --p2p-host=172.22.0.6
+      --p2p-port=30303
+      --static-nodes-file=/opt/besu/static-nodes.json
+      --rpc-http-enabled
+      --rpc-http-api=ETH,NET,WEB3
+      --rpc-http-host=0.0.0.0
+      --rpc-http-port=8545
+      --rpc-http-cors-origins=all
+      --host-allowlist=*
+      --min-gas-price=0
+      --tx-pool-min-gas-price=0
+    networks:
+      besu-internal:
+        ipv4_address: 172.20.0.4
+      besu-shared:
+        ipv4_address: 172.22.0.6
+
+  dc1-archive2:
+    image: hyperledger/besu:24.1.0
+    container_name: besu-dc1-archive2
+    user: root
+    labels:
+      besu.dr.mode: archive
+    depends_on:
+      - dc1-node1
+      - dc1-node2
+    ports:
+      - "8552:8545"
+    volumes:
+      - ./dc1-archive2/keys:/opt/besu/keys
+      - ./genesis.json:/opt/besu/genesis.json
+      - ../static-peers/dc1-archive2/static-nodes.json:/opt/besu/static-nodes.json:ro
+      - dc1-archive2-data:/opt/besu/data
+    command: >
+      --genesis-file=/opt/besu/genesis.json
+      --node-private-key-file=/opt/besu/keys/key
+      --data-path=/opt/besu/data
+      --sync-mode=FULL
+      --data-storage-format=FOREST
+      --p2p-host=172.22.0.7
+      --p2p-port=30303
+      --static-nodes-file=/opt/besu/static-nodes.json
+      --rpc-http-enabled
+      --rpc-http-api=ETH,NET,WEB3
+      --rpc-http-host=0.0.0.0
+      --rpc-http-port=8545
+      --rpc-http-cors-origins=all
+      --host-allowlist=*
+      --min-gas-price=0
+      --tx-pool-min-gas-price=0
+    networks:
+      besu-internal:
+        ipv4_address: 172.20.0.5
+      besu-shared:
+        ipv4_address: 172.22.0.7
+
 volumes:
   dc1-node1-data:
   dc1-node2-data:
+  dc1-archive1-data:
+  dc1-archive2-data:
 
 networks:
   besu-internal:

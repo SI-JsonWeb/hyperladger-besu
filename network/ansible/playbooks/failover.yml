@@ -21,75 +21,62 @@
       set_fact:
         dc1_failed: "{{ dc1_health.failed | bool }}"
 
-- name: Failover — spin recovery nodes in DC2
+- name: Inspect DC2 archive standby mode
   hosts: dc2
   gather_facts: false
   tasks:
-    - name: Check if recovery-node5 already running
-      command: docker inspect besu-recovery-node5
-      register: node5_exists
+    - name: Check dc2-archive3 mode
+      command: docker inspect -f "{{ '{{' }} index .Config.Labels \"besu.dr.mode\" {{ '}}' }}" besu-dc2-archive3
+      register: archive3_mode
       failed_when: false
       changed_when: false
 
-    - name: Stop DC1 validators before starting recovery validators
+    - name: Check dc2-archive4 mode
+      command: docker inspect -f "{{ '{{' }} index .Config.Labels \"besu.dr.mode\" {{ '}}' }}" besu-dc2-archive4
+      register: archive4_mode
+      failed_when: false
+      changed_when: false
+
+- name: Failover by promoting DC2 archive nodes
+  hosts: dc2
+  gather_facts: false
+  vars:
+    network_root: /home/webbacillus/10_projects/05_hyperladger_besu/hyperladger-besu/network
+  tasks:
+    - name: Stop DC1 validators before promoting archive nodes
       command: docker stop besu-dc1-node1 besu-dc1-node2
       failed_when: false
-      when: hostvars['dc1-server']['dc1_failed'] | bool
-
-    - name: Deploy recovery node5 in DC2 (uses dc1-node1 keys)
-      command: >
-        docker run -d
-        --name besu-recovery-node5
-        --network besu-shared
-        --ip 172.22.0.6
-        --user root
-        -p 8549:8545
-        -p 30307:30303
-        -v /home/webbacillus/10_projects/05_hyperladger_besu/hyperladger-besu/network/dc1/dc1-node1/keys:/opt/besu/keys
-        -v /home/webbacillus/10_projects/05_hyperladger_besu/hyperladger-besu/network/dc2/genesis.json:/opt/besu/genesis.json
-        -v /home/webbacillus/10_projects/05_hyperladger_besu/hyperladger-besu/network/static-peers/recovery-node5/static-nodes.json:/opt/besu/static-nodes.json:ro
-        hyperledger/besu:24.1.0
-        --genesis-file=/opt/besu/genesis.json
-        --node-private-key-file=/opt/besu/keys/key
-        --data-path=/opt/besu/data
-        --p2p-host=172.22.0.6
-        --p2p-port=30303
-        --static-nodes-file=/opt/besu/static-nodes.json
-        --rpc-http-enabled
-        --rpc-http-api=ETH,NET,QBFT,WEB3
-        --rpc-http-host=0.0.0.0
-        --rpc-http-port=8545
-        --rpc-http-cors-origins=all
-        --host-allowlist=*
-        --min-gas-price=0
-        --tx-pool-min-gas-price=0
       when:
         - hostvars['dc1-server']['dc1_failed'] | bool
-        - node5_exists.rc != 0
+        - archive3_mode.stdout != 'validator' or archive4_mode.stdout != 'validator'
 
-    - name: Check if recovery-node6 already running
-      command: docker inspect besu-recovery-node6
-      register: node6_exists
+    - name: Remove dc2-archive3 archive container before validator promotion
+      command: docker rm -f besu-dc2-archive3
       failed_when: false
-      changed_when: false
+      when:
+        - hostvars['dc1-server']['dc1_failed'] | bool
+        - archive3_mode.stdout != 'validator'
 
-    - name: Deploy recovery node6 in DC2 (uses dc1-node2 keys)
+    - name: Promote dc2-archive3 as validator using dc1-node1 key
       command: >
         docker run -d
-        --name besu-recovery-node6
+        --name besu-dc2-archive3
+        --label besu.dr.mode=validator
         --network besu-shared
-        --ip 172.22.0.7
+        --ip 172.22.0.8
         --user root
-        -p 8550:8545
-        -p 30308:30303
-        -v /home/webbacillus/10_projects/05_hyperladger_besu/hyperladger-besu/network/dc1/dc1-node2/keys:/opt/besu/keys
-        -v /home/webbacillus/10_projects/05_hyperladger_besu/hyperladger-besu/network/dc2/genesis.json:/opt/besu/genesis.json
-        -v /home/webbacillus/10_projects/05_hyperladger_besu/hyperladger-besu/network/static-peers/recovery-node6/static-nodes.json:/opt/besu/static-nodes.json:ro
+        -p 8553:8545
+        -v {{ network_root }}/dc1/dc1-node1/keys:/opt/besu/keys
+        -v {{ network_root }}/dc2/genesis.json:/opt/besu/genesis.json
+        -v {{ network_root }}/static-peers/dc2-archive3-validator/static-nodes.json:/opt/besu/static-nodes.json:ro
+        -v dc2_dc2-archive3-data:/opt/besu/data
         hyperledger/besu:24.1.0
         --genesis-file=/opt/besu/genesis.json
         --node-private-key-file=/opt/besu/keys/key
         --data-path=/opt/besu/data
-        --p2p-host=172.22.0.7
+        --sync-mode=FULL
+        --data-storage-format=FOREST
+        --p2p-host=172.22.0.8
         --p2p-port=30303
         --static-nodes-file=/opt/besu/static-nodes.json
         --rpc-http-enabled
@@ -102,16 +89,50 @@
         --tx-pool-min-gas-price=0
       when:
         - hostvars['dc1-server']['dc1_failed'] | bool
-        - node6_exists.rc != 0
+        - archive3_mode.stdout != 'validator'
 
-    - name: Log failover event
-      lineinfile:
-        path: /tmp/besu-failover.log
-        line: "{{ lookup('pipe', 'date --iso-8601=seconds') }} - DC1 failure detected, recovery nodes started in DC2"
-        create: true
-      when: hostvars['dc1-server']['dc1_failed'] | bool
+    - name: Remove dc2-archive4 archive container before validator promotion
+      command: docker rm -f besu-dc2-archive4
+      failed_when: false
+      when:
+        - hostvars['dc1-server']['dc1_failed'] | bool
+        - archive4_mode.stdout != 'validator'
 
-    - name: Wait for recovery RPC endpoints
+    - name: Promote dc2-archive4 as validator using dc1-node2 key
+      command: >
+        docker run -d
+        --name besu-dc2-archive4
+        --label besu.dr.mode=validator
+        --network besu-shared
+        --ip 172.22.0.9
+        --user root
+        -p 8554:8545
+        -v {{ network_root }}/dc1/dc1-node2/keys:/opt/besu/keys
+        -v {{ network_root }}/dc2/genesis.json:/opt/besu/genesis.json
+        -v {{ network_root }}/static-peers/dc2-archive4-validator/static-nodes.json:/opt/besu/static-nodes.json:ro
+        -v dc2_dc2-archive4-data:/opt/besu/data
+        hyperledger/besu:24.1.0
+        --genesis-file=/opt/besu/genesis.json
+        --node-private-key-file=/opt/besu/keys/key
+        --data-path=/opt/besu/data
+        --sync-mode=FULL
+        --data-storage-format=FOREST
+        --p2p-host=172.22.0.9
+        --p2p-port=30303
+        --static-nodes-file=/opt/besu/static-nodes.json
+        --rpc-http-enabled
+        --rpc-http-api=ETH,NET,QBFT,WEB3
+        --rpc-http-host=0.0.0.0
+        --rpc-http-port=8545
+        --rpc-http-cors-origins=all
+        --host-allowlist=*
+        --min-gas-price=0
+        --tx-pool-min-gas-price=0
+      when:
+        - hostvars['dc1-server']['dc1_failed'] | bool
+        - archive4_mode.stdout != 'validator'
+
+    - name: Wait for promoted archive validator RPC endpoints
       uri:
         url: "http://localhost:{{ item }}"
         method: POST
@@ -123,39 +144,61 @@
           id: 1
         timeout: 5
       loop:
-        - 8549
-        - 8550
-      register: recovery_rpc
+        - 8553
+        - 8554
+      register: promoted_rpc
       retries: 10
       delay: 3
-      until: recovery_rpc is not failed
+      until: promoted_rpc is not failed
       when: hostvars['dc1-server']['dc1_failed'] | bool
 
-- name: Cleanup recovery nodes if DC1 recovered
+    - name: Log archive validator failover event
+      lineinfile:
+        path: /tmp/besu-failover.log
+        line: "{{ lookup('pipe', 'date --iso-8601=seconds') }} - DC1 failure detected, A3/A4 promoted as validators in DC2"
+        create: true
+      when:
+        - hostvars['dc1-server']['dc1_failed'] | bool
+        - archive3_mode.stdout != 'validator' or archive4_mode.stdout != 'validator'
+
+- name: Failback by returning DC2 archive nodes to read-only mode
   hosts: dc2
   gather_facts: false
+  vars:
+    dc1_compose_dir: /home/webbacillus/10_projects/05_hyperladger_besu/hyperladger-besu/network/dc1
+    dc2_compose_dir: /home/webbacillus/10_projects/05_hyperladger_besu/hyperladger-besu/network/dc2
   tasks:
-    - name: Stop and remove recovery-node5 if DC1 is back
-      command: docker rm -f besu-recovery-node5
-      ignore_errors: true
+    - name: Remove dc2-archive3 validator-mode container if DC1 is back
+      command: docker rm -f besu-dc2-archive3
+      failed_when: false
       when:
         - not hostvars['dc1-server']['dc1_failed'] | bool
-        - node5_exists.rc == 0
+        - archive3_mode.stdout == 'validator'
 
-    - name: Stop and remove recovery-node6 if DC1 is back
-      command: docker rm -f besu-recovery-node6
-      ignore_errors: true
+    - name: Remove dc2-archive4 validator-mode container if DC1 is back
+      command: docker rm -f besu-dc2-archive4
+      failed_when: false
       when:
         - not hostvars['dc1-server']['dc1_failed'] | bool
-        - node6_exists.rc == 0
+        - archive4_mode.stdout == 'validator'
 
-    - name: Restart validators after recovery handback
-      command: docker restart besu-dc1-node1 besu-dc1-node2 besu-dc2-node3 besu-dc2-node4
+    - name: Start DC1 validators after archive handback
+      command: docker compose up -d dc1-node1 dc1-node2
+      args:
+        chdir: "{{ dc1_compose_dir }}"
       when:
         - not hostvars['dc1-server']['dc1_failed'] | bool
-        - node5_exists.rc == 0 or node6_exists.rc == 0
+        - archive3_mode.stdout == 'validator' or archive4_mode.stdout == 'validator'
 
-    - name: Wait for validator RPC endpoints after handback
+    - name: Restart DC2 archive nodes in read-only mode
+      command: docker compose up -d dc2-archive3 dc2-archive4
+      args:
+        chdir: "{{ dc2_compose_dir }}"
+      when:
+        - not hostvars['dc1-server']['dc1_failed'] | bool
+        - archive3_mode.stdout == 'validator' or archive4_mode.stdout == 'validator'
+
+    - name: Wait for normal and archive RPC endpoints after handback
       uri:
         url: "http://localhost:{{ item }}"
         method: POST
@@ -171,19 +214,21 @@
         - 8546
         - 8547
         - 8548
+        - 8553
+        - 8554
       register: handback_rpc
       retries: 12
       delay: 5
       until: handback_rpc is not failed
       when:
         - not hostvars['dc1-server']['dc1_failed'] | bool
-        - node5_exists.rc == 0 or node6_exists.rc == 0
+        - archive3_mode.stdout == 'validator' or archive4_mode.stdout == 'validator'
 
-    - name: Log DC1 recovery
+    - name: Log DC1 recovery and archive handback
       lineinfile:
         path: /tmp/besu-failover.log
-        line: "{{ lookup('pipe', 'date --iso-8601=seconds') }} - DC1 recovered, recovery nodes removed from DC2"
+        line: "{{ lookup('pipe', 'date --iso-8601=seconds') }} - DC1 recovered, A3/A4 returned to archive mode"
         create: true
       when:
         - not hostvars['dc1-server']['dc1_failed'] | bool
-        - node5_exists.rc == 0 or node6_exists.rc == 0
+        - archive3_mode.stdout == 'validator' or archive4_mode.stdout == 'validator'

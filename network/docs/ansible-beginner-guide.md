@@ -13,10 +13,10 @@ This project uses Ansible to:
 - start DC1 and DC2 Besu containers
 - check whether Besu RPC endpoints are healthy
 - detect when DC1 is down
-- start replacement recovery nodes in DC2
-- connect recovery nodes to surviving DC2 peers using static peer files
-- remove recovery nodes when DC1 comes back
-- reconnect and restart validators during failback
+- promote DC2 archive nodes `A3` and `A4` into validators
+- connect nodes using static peer files
+- return `A3` and `A4` to archive/read mode when DC1 comes back
+- avoid duplicate validator keys during failover and failback
 
 ## Important Files
 
@@ -170,8 +170,8 @@ This is the main automation for the experiment.
 
 It handles two situations:
 
-- DC1 is down, so recovery nodes must start in DC2.
-- DC1 is back, so recovery nodes must be removed and validators must be reconnected.
+- DC1 is down, so DC2 archive nodes `A3` and `A4` must become validators.
+- DC1 is back, so `A3` and `A4` must return to archive/read mode.
 
 ## Failover Flow
 
@@ -205,23 +205,25 @@ Then it stores a fact:
 
 If DC1 RPC is unreachable, `dc1_failed` becomes `true`.
 
-When `dc1_failed` is `true`, the playbook starts two recovery containers in DC2:
+When `dc1_failed` is `true`, the playbook promotes two DC2 archive containers:
 
-- `besu-recovery-node5`
-- `besu-recovery-node6`
+- `besu-dc2-archive3` (`A3`)
+- `besu-dc2-archive4` (`A4`)
 
-These containers reuse DC1 validator keys:
+These containers normally run as archive/read nodes with their own keys. During failover they are removed and recreated with DC1 validator keys:
 
-- `besu-recovery-node5` uses `dc1-node1` keys
-- `besu-recovery-node6` uses `dc1-node2` keys
+- `A3` uses `dc1-node1` keys
+- `A4` uses `dc1-node2` keys
 
 This lets DC2 temporarily host replacement validators for the failed DC1 validators.
 
-After starting recovery nodes, Besu connects them to the surviving DC2 peers using mounted `static-nodes.json` files from `network/static-peers/`.
+After promoting `A3` and `A4`, Besu connects them to the surviving DC2 peers using mounted `static-nodes.json` files from `network/static-peers/`.
 
-This step is important because Docker peer discovery is not always enough. A recovery node may be healthy at the RPC level but still have zero peers and stay stuck at block `0x0`.
+This step is important because Docker peer discovery is not always enough. A promoted node may be healthy at the RPC level but still have zero peers and stay stuck at block `0x0`.
 
 This design does not use `admin_addPeer`. The `ADMIN` RPC API is intentionally not enabled because it is too powerful for production-style operation.
+
+Archive nodes use `--sync-mode=FULL` and `--data-storage-format=FOREST` so they are suitable for archive/read use. `A3` and `A4` keep their data volumes when switching between archive mode and validator mode.
 
 ## Failback Flow
 
@@ -229,16 +231,16 @@ Failback means DC1 has returned and the network should move back to the normal f
 
 The playbook detects DC1 recovery when `http://localhost:8545` responds again.
 
-When DC1 is healthy and recovery containers exist, the playbook:
+When DC1 is healthy and `A3` or `A4` is in validator mode, the playbook:
 
-- removes `besu-recovery-node5`
-- removes `besu-recovery-node6`
-- restarts the four normal validators
+- removes the validator-mode `besu-dc2-archive3` container
+- removes the validator-mode `besu-dc2-archive4` container
+- starts the DC1 validators
+- starts `A3` and `A4` again through Docker Compose in archive/read mode
 - waits for their RPC endpoints
-- restarts validators so they reload static peer files and reconnect through the configured topology
 - writes a recovery log entry
 
-The validator restart is important in this experiment because DC1 may be restarted while recovery nodes with the same validator keys are still running. That duplicate-validator overlap can leave QBFT round state stuck. A clean handback restart resets the validators into the normal topology.
+The handback order is important because DC1 may be restarted while `A3` and `A4` are still using the same validator keys. That duplicate-validator overlap can leave QBFT round state stuck. The playbook removes promoted `A3` and `A4` before returning them to archive mode.
 
 ## Mermaid Diagram
 
@@ -249,18 +251,18 @@ flowchart TD
     B -->|RPC fails| C[Set dc1_failed = true]
     B -->|RPC works| H[Set dc1_failed = false]
 
-    C --> D[Check recovery containers]
-    D --> E[Start besu-recovery-node5 and node6 if missing]
-    E --> F[Wait for recovery RPC ports 8549 and 8550]
-    F --> G[Recovery nodes connect using static-nodes.json]
+    C --> D[Check A3/A4 mode labels]
+    D --> E[Promote A3 and A4 with V1/V2 keys if needed]
+    E --> F[Wait for A3/A4 RPC ports 8553 and 8554]
+    F --> G[Promoted validators connect using static-nodes.json]
     G --> Z[Log DC1 failure]
 
-    H --> I[Check if recovery containers exist]
-    I -->|No recovery containers| J[Do nothing]
-    I -->|Recovery containers exist| K[Remove recovery nodes]
-    K --> L[Restart normal validators]
-    L --> M[Wait for RPC ports 8545, 8546, 8547, 8548]
-    M --> N[Validators reconnect using static-nodes.json]
+    H --> I[Check A3/A4 mode labels]
+    I -->|Archive mode| J[Do nothing]
+    I -->|Validator mode| K[Remove promoted A3 and A4]
+    K --> L[Start DC1 validators]
+    L --> M[Start A3/A4 as archive nodes]
+    M --> N[Wait for RPC ports 8545-8548 and 8553-8554]
     N --> O[Log DC1 recovery]
 ```
 
@@ -336,7 +338,7 @@ Common statuses:
 - `failed` means the task failed.
 - `...ignoring` means the task failed but the playbook was configured to continue.
 
-For this project, expected healthy cron runs should mostly show `ok` and `skipping`. They should not restart validators or create recovery nodes unless the network is actually in a failover or failback state.
+For this project, expected healthy cron runs should mostly show `ok` and `skipping`. They should not promote archive nodes or restart containers unless the network is actually in a failover or failback state.
 
 ## Key Idea
 
@@ -344,6 +346,6 @@ This Ansible setup is a controller for a local Docker-based disaster recovery ex
 
 It does not make Besu magically recover by itself. Instead, it repeatedly checks the current state and applies the correct transition:
 
-- DC1 down: create temporary replacement validators in DC2.
-- DC1 back: remove temporary validators, restart normal validators, and reconnect peers.
+- DC1 down: promote `A3` and `A4` into temporary replacement validators in DC2.
+- DC1 back: return `A3` and `A4` to archive/read mode and resume the normal topology.
 - Normal state: do nothing.

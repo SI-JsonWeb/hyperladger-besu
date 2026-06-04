@@ -1,163 +1,187 @@
 # Disaster Recovery Redesign Proposal
 
-This proposal redesigns the local Docker-based Besu disaster recovery experiment so it does not use `ADMIN` RPC or `admin_addPeer`.
+This proposal describes the local Docker-based Besu disaster recovery experiment after removing `ADMIN` RPC and `admin_addPeer`.
 
-The experiment still models two separate data centers:
+The design now uses archive nodes as warm standby validators. Archive nodes provide read RPC during normal operation. If DC1 fails, the DC2 archive nodes `A3` and `A4` are restarted with the DC1 validator keys so they temporarily replace `V1` and `V2` in consensus.
 
-- DC1: original validators `besu-dc1-node1` and `besu-dc1-node2`
-- DC2: surviving validators `besu-dc2-node3` and `besu-dc2-node4`
-- Recovery in DC2: temporary validators `besu-recovery-node5` and `besu-recovery-node6`
+## Goals
 
-Recovery nodes intentionally reuse DC1 validator keys. Because of that, the automation must ensure original DC1 validators and their recovery replacements are not active at the same time.
+- Keep peer topology as static configuration, not runtime RPC mutation.
+- Keep `ADMIN` RPC disabled everywhere.
+- Keep archive/read endpoints available in both data centers during normal operation.
+- Let DC2 continue block production when DC1 is down by promoting `A3` and `A4`.
+- Avoid RPC port conflicts during failback.
+- Avoid duplicate validator keys during failover and failback.
 
-## Decision
-
-Do not use `ADMIN` RPC.
-
-Do not use `admin_addPeer`.
-
-Use Besu static peer files instead:
+## Normal Topology
 
 ```text
---static-nodes-file=/opt/besu/static-nodes.json
+DC1:
+  V1  besu-dc1-node1       validator       RPC 8545  P2P 172.22.0.2
+  V2  besu-dc1-node2       validator       RPC 8546  P2P 172.22.0.3
+  A1  besu-dc1-archive1    archive/read    RPC 8551  P2P 172.22.0.6
+  A2  besu-dc1-archive2    archive/read    RPC 8552  P2P 172.22.0.7
+
+DC2:
+  V3  besu-dc2-node3       validator       RPC 8547  P2P 172.22.0.4
+  V4  besu-dc2-node4       validator       RPC 8548  P2P 172.22.0.5
+  A3  besu-dc2-archive3    archive/read    RPC 8553  P2P 172.22.0.8
+  A4  besu-dc2-archive4    archive/read    RPC 8554  P2P 172.22.0.9
 ```
 
-The static peer files live in:
+Archive nodes run all the time so their data stays warm. They use their own non-validator node keys during normal operation.
+
+## Failover Topology
+
+When DC1 is down, `A3` and `A4` are promoted in DC2:
 
 ```text
-network/static-peers/
-  dc1-node1/static-nodes.json
-  dc1-node2/static-nodes.json
-  dc2-node3/static-nodes.json
-  dc2-node4/static-nodes.json
-  recovery-node5/static-nodes.json
-  recovery-node6/static-nodes.json
+DC2:
+  V3  besu-dc2-node3       validator, key V3
+  V4  besu-dc2-node4       validator, key V4
+  A3  besu-dc2-archive3    validator, key V1, RPC 8553, P2P 172.22.0.8
+  A4  besu-dc2-archive4    validator, key V2, RPC 8554, P2P 172.22.0.9
 ```
 
-Each node gets a static list of peer enodes through a read-only Docker volume mount.
+`A3` and `A4` keep their stable RPC ports. They do not take `V1` or `V2` host ports. This allows DC1 containers to be started later without Docker port conflicts.
 
-## Why ADMIN RPC Is Removed
+## Safety Rule
 
-`ADMIN` RPC allows runtime node administration. It can change peer connectivity and other operational behavior. It is useful in a lab, but it is not acceptable for a production-style design if exposed incorrectly.
+These pairs must never run at the same time:
 
-This redesign treats peer topology as configuration, not an RPC operation.
+```text
+besu-dc1-node1 and besu-dc2-archive3 using V1 key
+besu-dc1-node2 and besu-dc2-archive4 using V2 key
+```
 
-Normal JSON-RPC APIs are limited to:
+The problem is not RPC port conflict. The problem is duplicate QBFT validator identity.
+
+The failover playbook stops DC1 validators before promoting `A3` and `A4`.
+
+## Archive Storage
+
+Archive nodes use:
+
+```text
+--sync-mode=FULL
+--data-storage-format=FOREST
+```
+
+`FOREST` is used because these nodes are intended to act as archive/read nodes. The same data volume is reused when `A3` and `A4` switch between archive mode and validator mode.
+
+Important: the archive data volume should be initialized with `FOREST` from the first node start. Do not switch an existing Bonsai data directory to Forest.
+
+## RPC APIs
+
+Archive/read mode exposes only read APIs:
+
+```text
+ETH,NET,WEB3
+```
+
+Validator mode exposes QBFT as well:
 
 ```text
 ETH,NET,QBFT,WEB3
 ```
 
-## Target Behavior
+`ADMIN` is not enabled in either mode.
 
-The DR controller is still the Ansible playbook:
+## Static Peer Files
+
+All nodes use:
+
+```text
+--static-nodes-file=/opt/besu/static-nodes.json
+```
+
+Static peer files live under:
+
+```text
+network/static-peers/
+```
+
+`A3` and `A4` have separate static peer files for archive mode and validator mode because their node identity changes when their private key changes:
+
+```text
+dc2-archive3-archive/static-nodes.json
+dc2-archive4-archive/static-nodes.json
+dc2-archive3-validator/static-nodes.json
+dc2-archive4-validator/static-nodes.json
+```
+
+In validator mode:
+
+- `A3` uses the `V1` validator key at `172.22.0.8`.
+- `A4` uses the `V2` validator key at `172.22.0.9`.
+
+## Failover Flow
+
+The controller is:
 
 ```text
 ansible/playbooks/failover.yml
 ```
 
-Cron runs it every minute.
+Cron runs it every minute in the lab.
 
-The playbook should be idempotent:
+When DC1 RPC on `localhost:8545` is unreachable:
 
-- If DC1 is healthy and no recovery nodes exist, do nothing.
-- If DC1 is down, start recovery nodes in DC2.
-- If DC1 is back and recovery nodes exist, remove recovery nodes and restart normal validators.
-
-## Failover Flow
-
-Failover starts when DC1 RPC on `localhost:8545` is unreachable.
-
-Steps:
-
-1. Check whether recovery containers already exist.
-2. Stop DC1 validator containers to avoid duplicate validator keys.
-3. Start `besu-recovery-node5` using `dc1-node1` keys.
-4. Start `besu-recovery-node6` using `dc1-node2` keys.
-5. Mount recovery static peer files into both recovery containers.
-6. Wait for recovery RPC endpoints `8549` and `8550`.
-7. Let Besu connect using `static-nodes.json`.
+1. Inspect current `A3` and `A4` mode labels.
+2. Stop `besu-dc1-node1` and `besu-dc1-node2`.
+3. Remove `besu-dc2-archive3` archive-mode container.
+4. Recreate `besu-dc2-archive3` with the `V1` key, validator APIs, and validator static peers.
+5. Remove `besu-dc2-archive4` archive-mode container.
+6. Recreate `besu-dc2-archive4` with the `V2` key, validator APIs, and validator static peers.
+7. Wait for `A3` and `A4` RPC on ports `8553` and `8554`.
 8. Log the failover event.
 
-Recovery node static peers include:
+The `A3` and `A4` containers are labeled:
 
-- `besu-dc2-node3`
-- `besu-dc2-node4`
-- the other recovery node
+```text
+besu.dr.mode=validator
+```
+
+That keeps repeated cron runs idempotent while DC1 remains down.
 
 ## Failback Flow
 
-Failback starts when DC1 RPC on `localhost:8545` responds again and recovery containers exist.
+When DC1 RPC on `localhost:8545` responds and `A3` or `A4` is in validator mode:
 
-Steps:
+1. Remove `A3` and `A4` validator-mode containers.
+2. Start `V1` and `V2` through the DC1 Docker Compose file.
+3. Start `A3` and `A4` through the DC2 Docker Compose file so they return to archive/read mode.
+4. Wait for normal validator and archive RPC endpoints.
+5. Log the handback event.
 
-1. Remove `besu-recovery-node5`.
-2. Remove `besu-recovery-node6`.
-3. Restart normal validators:
-   - `besu-dc1-node1`
-   - `besu-dc1-node2`
-   - `besu-dc2-node3`
-   - `besu-dc2-node4`
-4. Wait for RPC endpoints `8545`, `8546`, `8547`, `8548`.
-5. Let all validators reconnect using their mounted `static-nodes.json` files.
-6. Log the failback event.
-
-Temporary downtime during failback is acceptable in this experiment. The restart is intentional because recovery nodes reuse DC1 validator keys, and overlapping validator identities can leave QBFT in a bad round state.
-
-## Static Peer Topology
-
-Normal validator static peer files use the shared Docker network addresses:
+The `A3` and `A4` containers return to:
 
 ```text
-dc1-node1: 172.22.0.2
-dc1-node2: 172.22.0.3
-dc2-node3: 172.22.0.4
-dc2-node4: 172.22.0.5
+besu.dr.mode=archive
 ```
 
-Recovery validator addresses:
-
-```text
-recovery-node5: 172.22.0.6
-recovery-node6: 172.22.0.7
-```
-
-Each normal validator static file contains the other three normal validators.
-
-Each recovery static file contains the two DC2 validators and the other recovery validator.
+Temporary downtime during failback is acceptable in this lab.
 
 ## Diagram
 
 ```mermaid
 flowchart TD
-    A[Cron runs failover.yml] --> B[Check DC1 RPC]
+    A[Cron runs failover.yml] --> B[Check DC1 V1 RPC]
 
-    B -->|DC1 down| C[Stop DC1 validators]
-    C --> D[Start recovery-node5 and recovery-node6]
-    D --> E[Mount recovery static-nodes.json files]
-    E --> F[Recovery nodes connect to DC2 via static peers]
-    F --> G[DC2 plus recovery validators continue chain]
+    B -->|DC1 down| C[Stop V1 and V2]
+    C --> D[Remove A3 and A4 archive containers]
+    D --> E[Restart A3 with V1 key]
+    D --> F[Restart A4 with V2 key]
+    E --> G[DC2 validators continue: V3 V4 A3 A4]
+    F --> G
 
-    B -->|DC1 up| H{Recovery nodes exist?}
+    B -->|DC1 up| H{A3 or A4 in validator mode?}
     H -->|No| I[Do nothing]
-    H -->|Yes| J[Remove recovery nodes]
-    J --> K[Restart normal validators]
-    K --> L[Validators reload normal static-nodes.json files]
-    L --> M[Normal DC1 plus DC2 topology resumes]
+    H -->|Yes| J[Remove A3 and A4 validator containers]
+    J --> K[Start V1 and V2]
+    K --> L[Start A3 and A4 as archive nodes]
+    L --> M[Normal topology resumes]
 ```
-
-## Safety Rule
-
-These pairs must not run together:
-
-```text
-besu-dc1-node1 and besu-recovery-node5
-besu-dc1-node2 and besu-recovery-node6
-```
-
-They use the same validator keys.
-
-The failover playbook stops DC1 validators before starting recovery validators to reduce the chance of duplicate validator identities.
 
 ## Verification Commands
 
@@ -172,35 +196,29 @@ curl -s -X POST http://localhost:8545 \
 Check peer count:
 
 ```bash
-curl -s -X POST http://localhost:8545 \
+curl -s -X POST http://localhost:8553 \
   -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","method":"net_peerCount","params":[],"id":1}'
 ```
 
-Check enabled APIs indirectly by ensuring `admin_addPeer` is not available. It should not be used by automation and should not appear in the playbooks.
+Check that `ADMIN` is disabled:
+
+```bash
+curl -s -X POST http://localhost:8553 \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","method":"admin_peers","params":[],"id":1}'
+```
+
+Expected result:
+
+```text
+Method not enabled
+```
+
+Search automation and compose config:
 
 ```bash
 grep -R "admin_addPeer\|ADMIN" ansible dc1 dc2 static-peers
 ```
 
 Expected result: no matches.
-
-## Current Limitations
-
-This is still a local Docker experiment.
-
-The next improvement would be a stronger state machine, for example:
-
-```text
-/tmp/besu-dr-state
-```
-
-Possible states:
-
-```text
-normal
-failed-over
-failing-back
-```
-
-That would make the cron-driven controller easier to reason about and avoid repeated log events.
