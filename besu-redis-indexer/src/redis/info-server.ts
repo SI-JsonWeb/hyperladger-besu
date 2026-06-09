@@ -4,6 +4,22 @@ import { config } from '../config';
 import { PROGRESS_CHANNEL, readProgressSnapshot } from './progress';
 
 type RedisClient = ReturnType<typeof createClient>;
+type SearchIndex = 'blocks' | 'txs' | 'events';
+
+const SEARCH_LIMIT = 20;
+const SEARCH_INDEXES: Record<SearchIndex, string> = {
+  blocks: 'idx:besu_blocks',
+  txs: 'idx:besu_txs',
+  events: 'idx:dfp_events',
+};
+const EVENT_NAMES = new Set([
+  'AssetRegistered',
+  'FinancingRecorded',
+  'LienReleased',
+  'FraudAttemptDetected',
+  'AccountFlagged',
+  'FileRegistered',
+]);
 
 interface RedisInfo {
   generatedAt: string;
@@ -24,6 +40,20 @@ interface RedisInfo {
   streams: Array<{ name: string; length: number | null }>;
   cursor: Record<string, string> | null;
   error?: string;
+}
+
+interface SearchResult {
+  key: string;
+  fields: Record<string, string>;
+}
+
+interface SearchResponse {
+  query: string;
+  index: SearchIndex;
+  command: string;
+  total: number;
+  returned: number;
+  results: SearchResult[];
 }
 
 export function startRedisInfoServer(client: RedisClient): Server {
@@ -51,6 +81,12 @@ export function startRedisInfoServer(client: RedisClient): Server {
 
       if (url.pathname === '/api/progress') {
         await streamProgress(client, req, res);
+        return;
+      }
+
+      if (url.pathname === '/api/search') {
+        const result = await searchRedis(client, url);
+        sendJson(res, result.statusCode, result.body);
         return;
       }
 
@@ -169,6 +205,160 @@ async function collectRedisInfo(client: RedisClient): Promise<RedisInfo> {
     streams,
     cursor,
   };
+}
+
+async function searchRedis(
+  client: RedisClient,
+  url: URL
+): Promise<{ statusCode: number; body: SearchResponse | { error: string } }> {
+  const query = (url.searchParams.get('q') ?? '').trim();
+  if (!query) {
+    return { statusCode: 400, body: { error: 'query parameter "q" is required' } };
+  }
+
+  const index = parseSearchIndex(url.searchParams.get('index'));
+
+  try {
+    if (index === 'txs') {
+      return { statusCode: 200, body: await searchTransactions(client, query) };
+    }
+
+    const built = buildSearchCommand(index, query);
+    const raw = await client.sendCommand(built.args);
+    const parsed = parseSearchResult(raw);
+    return {
+      statusCode: 200,
+      body: {
+        query,
+        index,
+        command: built.display,
+        total: parsed.total,
+        returned: parsed.results.length,
+        results: parsed.results,
+      },
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { statusCode: 503, body: { error: message } };
+  }
+}
+
+async function searchTransactions(client: RedisClient, query: string): Promise<SearchResponse> {
+  const fields = ['hash', 'from', 'to'];
+  const merged = new Map<string, SearchResult>();
+  const commands: string[] = [];
+
+  for (const field of fields) {
+    const redisQuery = `@${field}:{${escapeTagValue(query)}}`;
+    const args = ['FT.SEARCH', SEARCH_INDEXES.txs, redisQuery, 'LIMIT', '0', String(SEARCH_LIMIT)];
+    commands.push(formatCommand(args));
+    const parsed = parseSearchResult(await client.sendCommand(args));
+    for (const result of parsed.results) {
+      if (!merged.has(result.key)) {
+        merged.set(result.key, result);
+      }
+      if (merged.size >= SEARCH_LIMIT) break;
+    }
+  }
+
+  const results = Array.from(merged.values()).slice(0, SEARCH_LIMIT);
+  return {
+    query,
+    index: 'txs',
+    command: commands.join(' ; '),
+    total: merged.size,
+    returned: results.length,
+    results,
+  };
+}
+
+function buildSearchCommand(index: Exclude<SearchIndex, 'txs'>, query: string): { args: string[]; display: string } {
+  const redisQuery = index === 'events'
+    ? buildEventsQuery(query)
+    : buildBlocksQuery(query);
+  const args = ['FT.SEARCH', SEARCH_INDEXES[index], redisQuery, 'LIMIT', '0', String(SEARCH_LIMIT)];
+  return { args, display: formatCommand(args) };
+}
+
+function buildEventsQuery(query: string): string {
+  if (EVENT_NAMES.has(query)) {
+    return `@eventName:{${escapeTagValue(query)}}`;
+  }
+
+  const tagValue = escapeTagValue(query);
+  const textValue = escapeTextValue(query);
+  return `(${[
+    `@eventName:{${tagValue}}`,
+    `@assetId:{${tagValue}}`,
+    `@owner:{${tagValue}}`,
+    `@borrower:{${tagValue}}`,
+    `@lender:{${tagValue}}`,
+    `@account:{${tagValue}}`,
+    `@txHash:{${tagValue}}`,
+    `@fileHash:{${tagValue}}`,
+    `@reason:${textValue}*`,
+    `@fileURI:${textValue}*`,
+  ].join(' | ')})`;
+}
+
+function buildBlocksQuery(query: string): string {
+  const numeric = Number(query);
+  if (Number.isInteger(numeric) && numeric >= 0) {
+    return `@number:[${numeric} ${numeric}]`;
+  }
+
+  const tagValue = escapeTagValue(query);
+  return `(@hash:{${tagValue}} | @parentHash:{${tagValue}})`;
+}
+
+function parseSearchIndex(raw: string | null): SearchIndex {
+  if (raw === 'blocks' || raw === 'txs' || raw === 'events') {
+    return raw;
+  }
+  return 'events';
+}
+
+function parseSearchResult(raw: unknown): { total: number; results: SearchResult[] } {
+  if (!Array.isArray(raw) || typeof raw[0] !== 'number') {
+    return { total: 0, results: [] };
+  }
+
+  const results: SearchResult[] = [];
+  for (let i = 1; i < raw.length; i += 2) {
+    const key = raw[i];
+    const fields = raw[i + 1];
+    if (typeof key !== 'string') continue;
+    results.push({ key, fields: parseSearchFields(fields) });
+  }
+
+  return { total: raw[0], results };
+}
+
+function parseSearchFields(raw: unknown): Record<string, string> {
+  const parsed: Record<string, string> = {};
+  if (!Array.isArray(raw)) return parsed;
+
+  for (let i = 0; i < raw.length; i += 2) {
+    const key = raw[i];
+    const value = raw[i + 1];
+    if (typeof key === 'string') {
+      parsed[key] = typeof value === 'string' ? value : String(value ?? '');
+    }
+  }
+
+  return parsed;
+}
+
+function escapeTagValue(value: string): string {
+  return value.replace(/([\\{}[\]|,.<>:"';!@#$%^&*()\-+=~ ])/g, '\\$1');
+}
+
+function escapeTextValue(value: string): string {
+  return value.replace(/([\\@{}[\]()"':;,.<>~*?+|=&!%-])/g, '\\$1');
+}
+
+function formatCommand(args: string[]): string {
+  return args.join(' ');
 }
 
 function createErrorInfo(message: string): RedisInfo {
@@ -402,6 +592,82 @@ function renderDashboard(info: RedisInfo): string {
     th { width: 44%; color: var(--muted); font: 700 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: 0; }
     td { font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #243447; word-break: break-word; }
     .error-box { margin: 0 0 16px; padding: 12px 14px; border: 1px solid #f2b8b5; border-radius: 8px; background: var(--danger-soft); color: var(--danger); }
+    .search-body { padding: 16px; }
+    .tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+    .tab-button {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--panel);
+      color: var(--muted);
+      cursor: pointer;
+      font: 700 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      padding: 8px 12px;
+    }
+    .tab-button.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+    .search-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
+    .search-input {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--text);
+      font: 14px ui-sans-serif, system-ui, sans-serif;
+      padding: 11px 12px;
+    }
+    .search-button {
+      border: 1px solid var(--accent);
+      border-radius: 8px;
+      background: var(--accent);
+      color: #ffffff;
+      cursor: pointer;
+      font: 750 13px ui-sans-serif, system-ui, sans-serif;
+      padding: 0 16px;
+    }
+    .event-presets {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .event-preset {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #ffffff;
+      color: #334155;
+      cursor: pointer;
+      font: 700 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      padding: 7px 10px;
+    }
+    .event-preset:hover { border-color: var(--accent); color: var(--accent); }
+    .event-preset.fraud { border-color: #f2b8b5; color: var(--danger); background: #fffafa; }
+    .command {
+      display: none;
+      margin: 12px 0 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f8fafc;
+      color: var(--muted);
+      font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      overflow-wrap: anywhere;
+      padding: 10px 12px;
+    }
+    .search-message { margin-top: 12px; color: var(--muted); font-size: 13px; }
+    .search-message.error { color: var(--danger); }
+    .results-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+    .result-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      padding: 14px;
+      min-width: 0;
+    }
+    .result-card.fraud { border-color: #f2b8b5; background: #fffafa; }
+    .result-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 18px; font-weight: 750; line-height: 1.25; overflow-wrap: anywhere; }
+    .badge { border-radius: 999px; background: var(--accent-soft); color: var(--accent); font: 750 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; padding: 4px 7px; white-space: nowrap; }
+    .badge.danger { background: var(--danger-soft); color: var(--danger); }
+    .result-fields { display: grid; gap: 8px; margin-top: 12px; }
+    .result-row { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 10px; font-size: 13px; }
+    .result-row span:first-child { color: var(--muted); font: 700 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .result-row span:last-child { overflow-wrap: anywhere; }
     .activity { list-style: none; margin: 0; padding: 0; }
     .activity li { display: grid; grid-template-columns: 92px minmax(0, 1fr) auto; gap: 12px; padding: 13px 16px; border-top: 1px solid var(--line); align-items: center; }
     .activity li:first-child { border-top: 0; }
@@ -419,6 +685,8 @@ function renderDashboard(info: RedisInfo): string {
     @media (max-width: 620px) {
       body { padding: 14px; }
       .grid { grid-template-columns: 1fr; }
+      .search-form, .results-grid { grid-template-columns: 1fr; }
+      .search-button { min-height: 42px; }
       .wide { grid-column: auto; }
       .activity li { grid-template-columns: 1fr; gap: 6px; }
       .meta { white-space: normal; }
@@ -447,6 +715,32 @@ function renderDashboard(info: RedisInfo): string {
       <article class="card"><div class="label">Transactions</div><div id="txs-indexed" class="value">0</div></article>
       <article class="card"><div class="label">Events</div><div id="events-indexed" class="value">0</div></article>
       <article class="card"><div class="label">Last block at</div><div id="last-block-at" class="value small">-</div></article>
+    </section>
+
+    <section class="panel">
+      <h2>Redis Search</h2>
+      <div class="search-body">
+        <div class="tabs" role="tablist" aria-label="Search index">
+          <button class="tab-button" type="button" data-search-index="blocks">Blocks</button>
+          <button class="tab-button" type="button" data-search-index="txs">Transactions</button>
+          <button class="tab-button active" type="button" data-search-index="events">Events</button>
+        </div>
+        <form id="search-form" class="search-form">
+          <input id="search-input" class="search-input" name="q" type="search" placeholder="Search by event name, borrower, assetId..." autocomplete="off">
+          <button class="search-button" type="submit">Search</button>
+        </form>
+        <div id="event-presets" class="event-presets" aria-label="Predefined events">
+          <button class="event-preset" type="button" data-event-name="AssetRegistered">AssetRegistered</button>
+          <button class="event-preset" type="button" data-event-name="FinancingRecorded">FinancingRecorded</button>
+          <button class="event-preset" type="button" data-event-name="LienReleased">LienReleased</button>
+          <button class="event-preset fraud" type="button" data-event-name="FraudAttemptDetected">FraudAttemptDetected</button>
+          <button class="event-preset fraud" type="button" data-event-name="AccountFlagged">AccountFlagged</button>
+          <button class="event-preset" type="button" data-event-name="FileRegistered">FileRegistered</button>
+        </div>
+        <pre id="search-command" class="command"></pre>
+        <div id="search-message" class="search-message">Enter a query to search Redis indexes.</div>
+        <div id="search-results" class="results-grid"></div>
+      </div>
     </section>
 
     <section class="layout">
@@ -492,12 +786,25 @@ function renderDashboard(info: RedisInfo): string {
   <script>
     const initialInfo = ${initialInfoJson};
     const fraudEventNames = new Set(['FraudAttemptDetected', 'AccountFlagged']);
+    const searchPlaceholders = {
+      blocks: 'Search by block number, hash...',
+      txs: 'Search by tx hash, from/to address...',
+      events: 'Search by event name, borrower, assetId...'
+    };
+    let activeSearchIndex = 'events';
     let snapshotState = null;
     let recentState = [];
 
     function setText(id, value) {
       const el = document.getElementById(id);
       if (el) el.textContent = value;
+    }
+
+    function truncateMiddle(value, head = 10, tail = 6) {
+      if (!value) return '-';
+      const text = String(value);
+      if (text.length <= head + tail + 3) return text;
+      return text.slice(0, head) + '...' + text.slice(-tail);
     }
 
     function formatNumber(value) {
@@ -646,7 +953,234 @@ function renderDashboard(info: RedisInfo): string {
       };
     }
 
+    function setupSearch() {
+      const tabs = Array.from(document.querySelectorAll('[data-search-index]'));
+      const eventPresets = Array.from(document.querySelectorAll('[data-event-name]'));
+      const eventPresetWrap = document.getElementById('event-presets');
+      const input = document.getElementById('search-input');
+      const form = document.getElementById('search-form');
+      if (!input || !form) return;
+
+      const syncEventPresets = () => {
+        if (eventPresetWrap) {
+          eventPresetWrap.style.display = activeSearchIndex === 'events' ? 'flex' : 'none';
+        }
+      };
+
+      for (const tab of tabs) {
+        tab.addEventListener('click', () => {
+          activeSearchIndex = tab.getAttribute('data-search-index') || 'events';
+          for (const button of tabs) {
+            button.classList.toggle('active', button === tab);
+          }
+          input.placeholder = searchPlaceholders[activeSearchIndex] || searchPlaceholders.events;
+          syncEventPresets();
+          clearSearch(false);
+        });
+      }
+
+      for (const preset of eventPresets) {
+        preset.addEventListener('click', () => {
+          const eventName = preset.getAttribute('data-event-name') || '';
+          activeSearchIndex = 'events';
+          for (const button of tabs) {
+            button.classList.toggle('active', button.getAttribute('data-search-index') === 'events');
+          }
+          input.placeholder = searchPlaceholders.events;
+          input.value = eventName;
+          syncEventPresets();
+          void runSearch(eventName);
+        });
+      }
+
+      form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        void runSearch(input.value);
+      });
+
+      syncEventPresets();
+    }
+
+    function clearSearch(clearInput) {
+      const command = document.getElementById('search-command');
+      const results = document.getElementById('search-results');
+      if (command) {
+        command.style.display = 'none';
+        command.textContent = '';
+      }
+      if (results) results.textContent = '';
+      setSearchMessage('Enter a query to search Redis indexes.');
+      if (clearInput) {
+        const input = document.getElementById('search-input');
+        if (input) input.value = '';
+      }
+    }
+
+    async function runSearch(rawQuery) {
+      const query = rawQuery.trim();
+      if (!query) {
+        clearSearch(false);
+        setSearchMessage('Enter a query to search Redis indexes.');
+        return;
+      }
+
+      setSearchMessage('Searching...');
+      const command = document.getElementById('search-command');
+      const results = document.getElementById('search-results');
+      if (results) results.textContent = '';
+      if (command) {
+        command.style.display = 'none';
+        command.textContent = '';
+      }
+
+      try {
+        const params = new URLSearchParams({ q: query, index: activeSearchIndex });
+        const response = await fetch('/api/search?' + params.toString(), { cache: 'no-store' });
+        const payload = await response.json();
+        if (!response.ok) {
+          throw new Error(payload.error || 'search request failed with HTTP ' + response.status);
+        }
+        renderSearchResponse(payload);
+      } catch (err) {
+        setSearchMessage(err instanceof Error ? err.message : String(err), true);
+      }
+    }
+
+    function renderSearchResponse(payload) {
+      const command = document.getElementById('search-command');
+      const results = document.getElementById('search-results');
+      if (command) {
+        command.style.display = 'block';
+        command.textContent = payload.command || '';
+      }
+      if (!results) return;
+      results.textContent = '';
+
+      if (!payload.results || payload.results.length === 0) {
+        setSearchMessage("No results for '" + payload.query + "' in index '" + payload.index + "'");
+        return;
+      }
+
+      setSearchMessage(payload.returned + ' of ' + payload.total + ' result(s)');
+      for (const result of payload.results) {
+        results.appendChild(createResultCard(payload.index, result));
+      }
+    }
+
+    function setSearchMessage(message, isError = false) {
+      const el = document.getElementById('search-message');
+      if (!el) return;
+      el.textContent = message;
+      el.className = isError ? 'search-message error' : 'search-message';
+    }
+
+    function createResultCard(index, result) {
+      if (index === 'blocks') return createBlockCard(result);
+      if (index === 'txs') return createTxCard(result);
+      return createEventCard(result);
+    }
+
+    function createEventCard(result) {
+      const fields = result.fields || {};
+      const isFraud = fraudEventNames.has(fields.eventName);
+      const card = createBaseResultCard(fields.eventName || result.key, isFraud ? 'FRAUD' : null);
+      if (isFraud) card.classList.add('fraud');
+      const rows = [
+        ['block', fields.blockNumber],
+        ['tx', truncateMiddle(fields.txHash)],
+      ];
+
+      switch (fields.eventName) {
+        case 'FraudAttemptDetected':
+        case 'AccountFlagged':
+          rows.push(['reason', fields.reason]);
+          break;
+        case 'FinancingRecorded':
+          rows.push(['borrower', truncateMiddle(fields.borrower)]);
+          rows.push(['lender', truncateMiddle(fields.lender)]);
+          break;
+        case 'AssetRegistered':
+          rows.push(['assetId', fields.assetId]);
+          rows.push(['owner', truncateMiddle(fields.owner)]);
+          break;
+        case 'LienReleased':
+          rows.push(['assetId', fields.assetId]);
+          break;
+        case 'FileRegistered':
+          rows.push(['fileURI', fields.fileURI]);
+          break;
+        default:
+          rows.push(['key', result.key]);
+      }
+
+      appendResultRows(card, rows);
+      return card;
+    }
+
+    function createBlockCard(result) {
+      const fields = result.fields || {};
+      const card = createBaseResultCard('#' + (fields.number || result.key), null);
+      const timestamp = parseNumber(fields.timestamp);
+      appendResultRows(card, [
+        ['timestamp', timestamp === null ? '-' : new Date(timestamp * 1000).toLocaleString()],
+        ['txCount', fields.txCount],
+        ['hash', truncateMiddle(fields.hash)],
+      ]);
+      return card;
+    }
+
+    function createTxCard(result) {
+      const fields = result.fields || {};
+      const status = fields.status === '0' ? 'failed' : 'success';
+      const card = createBaseResultCard(truncateMiddle(fields.hash || result.key), status);
+      const badge = card.querySelector('.badge');
+      if (badge && status === 'failed') badge.classList.add('danger');
+      appendResultRows(card, [
+        ['from', truncateMiddle(fields.from)],
+        ['to', truncateMiddle(fields.to)],
+        ['valueWei', fields.valueWei],
+        ['block', fields.blockNumber],
+      ]);
+      return card;
+    }
+
+    function createBaseResultCard(title, badgeText) {
+      const card = document.createElement('article');
+      card.className = 'result-card';
+      const heading = document.createElement('div');
+      heading.className = 'result-title';
+      const text = document.createElement('span');
+      text.textContent = title || '-';
+      heading.appendChild(text);
+      if (badgeText) {
+        const badge = document.createElement('span');
+        badge.className = badgeText === 'FRAUD' ? 'badge danger' : 'badge';
+        badge.textContent = badgeText;
+        heading.appendChild(badge);
+      }
+      card.appendChild(heading);
+      return card;
+    }
+
+    function appendResultRows(card, rows) {
+      const wrap = document.createElement('div');
+      wrap.className = 'result-fields';
+      for (const [label, value] of rows) {
+        if (value === undefined || value === null || value === '') continue;
+        const row = document.createElement('div');
+        row.className = 'result-row';
+        const labelEl = document.createElement('span');
+        const valueEl = document.createElement('span');
+        labelEl.textContent = label;
+        valueEl.textContent = String(value);
+        row.append(labelEl, valueEl);
+        wrap.appendChild(row);
+      }
+      card.appendChild(wrap);
+    }
+
     setText('redis-status', initialInfo.redis.status);
+    setupSearch();
     loadSnapshot()
       .catch((err) => {
         setSseStatus('snapshot error', 'error');
