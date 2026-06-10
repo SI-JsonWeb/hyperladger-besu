@@ -21,6 +21,13 @@ import {
   recordBlockProgress,
   writeProgressHead,
 } from '../redis/progress';
+import { OpenSearchClient } from '../opensearch/client';
+import {
+  deleteOpenSearchEventDoc,
+  writeOpenSearchBlockDoc,
+  writeOpenSearchEventDoc,
+  writeOpenSearchTxDoc,
+} from '../opensearch/writer';
 
 export interface SingleFlightGuard {
   run<T>(fn: () => Promise<T>): Promise<void>;
@@ -44,14 +51,19 @@ export function createSingleFlightGuard(): SingleFlightGuard {
 
 async function processBlock(
   client: RedisClient,
+  openSearchClient: OpenSearchClient | null,
   provider: JsonRpcProvider,
-  block: BlockWithTxs
+  block: BlockWithTxs,
+  headBlockNumber: number
 ): Promise<void> {
   const chainId = config.CHAIN_ID;
   const blockKey = `besu:block:${chainId}:${block.number}`;
   const blockHash = block.hash ?? '';
 
   await writeBlockDoc(client, chainId, block);
+  if (openSearchClient) {
+    await writeOpenSearchBlockDoc(openSearchClient, config.OPENSEARCH_INDEX_PREFIX, chainId, block);
+  }
   await addBlockStream(client, chainId, block.number, blockKey);
 
   for (const tx of block.transactions) {
@@ -69,6 +81,9 @@ async function processBlock(
       index: tx.index,
     };
     await writeTxDoc(client, chainId, txDoc, block.number, blockHash, txStatus);
+    if (openSearchClient) {
+      await writeOpenSearchTxDoc(openSearchClient, config.OPENSEARCH_INDEX_PREFIX, chainId, txDoc, block.number, blockHash, txStatus);
+    }
     await addTxStream(client, chainId, tx.hash, txKey);
   }
 
@@ -81,12 +96,18 @@ async function processBlock(
   for (const event of removedEvents) {
     const eventKey = `dfp:event:${chainId}:${event.blockNumber}:${event.txIndex}:${event.logIndex}`;
     await deleteEventDoc(client, chainId, event);
+    if (openSearchClient) {
+      await deleteOpenSearchEventDoc(openSearchClient, config.OPENSEARCH_INDEX_PREFIX, chainId, event);
+    }
     await addRemovalStream(client, chainId, event.eventName, eventKey);
   }
 
   for (const event of currentEvents) {
     const eventKey = `dfp:event:${chainId}:${event.blockNumber}:${event.txIndex}:${event.logIndex}`;
     await writeEventDoc(client, chainId, event);
+    if (openSearchClient) {
+      await writeOpenSearchEventDoc(openSearchClient, config.OPENSEARCH_INDEX_PREFIX, chainId, event);
+    }
     await addEventStream(client, chainId, event.eventName, eventKey);
   }
 
@@ -96,6 +117,7 @@ async function processBlock(
   const ts = new Date().toISOString();
   await recordBlockProgress(client, chainId, {
     blockNumber: block.number,
+    headBlockNumber,
     txCount: block.transactions.length,
     eventNames,
     isFraud: eventNames.some(isFraudEventName),
@@ -105,6 +127,7 @@ async function processBlock(
 
 export async function runCatchUp(
   client: RedisClient,
+  openSearchClient: OpenSearchClient | null,
   provider: JsonRpcProvider
 ): Promise<void> {
   const chainId = config.CHAIN_ID;
@@ -126,7 +149,7 @@ export async function runCatchUp(
   for (let blockNumber = startBlock; blockNumber <= currentBlock; blockNumber++) {
     const block = await getBlockWithTxs(provider, blockNumber);
     if (!block) continue;
-    await processBlock(client, provider, block);
+    await processBlock(client, openSearchClient, provider, block, currentBlock);
   }
 
   console.log(`catchup from ${startBlock} to ${currentBlock} complete`);
@@ -137,24 +160,26 @@ let pollingInterval: ReturnType<typeof setInterval> | null = null;
 export async function startWsSubscription(
   wsProvider: WebSocketProvider,
   client: RedisClient,
+  openSearchClient: OpenSearchClient | null,
   httpProvider: JsonRpcProvider
 ): Promise<void> {
   const guard = createSingleFlightGuard();
 
   wsProvider.on('block', async (_blockNumber: number) => {
-    await guard.run(() => runCatchUp(client, httpProvider));
+    await guard.run(() => runCatchUp(client, openSearchClient, httpProvider));
   });
 }
 
 export function startHttpPolling(
   client: RedisClient,
+  openSearchClient: OpenSearchClient | null,
   httpProvider: JsonRpcProvider,
   intervalMs: number
 ): void {
   const guard = createSingleFlightGuard();
 
   pollingInterval = setInterval(async () => {
-    await guard.run(() => runCatchUp(client, httpProvider));
+    await guard.run(() => runCatchUp(client, openSearchClient, httpProvider));
   }, intervalMs);
 }
 

@@ -4,6 +4,8 @@ import { abi, requiredEvents } from './artifacts';
 import { createRedisClient, closeRedisClient } from './redis/client';
 import { ensureSchemas } from './redis/schema';
 import { startRedisInfoServer, closeRedisInfoServer } from './redis/info-server';
+import { createOpenSearchClient, closeOpenSearchClient } from './opensearch/client';
+import { ensureOpenSearchSchemas } from './opensearch/schema';
 import { createHttpProvider, createWsProvider } from './besu/reader';
 import { runCatchUp, startWsSubscription, startHttpPolling, stopHttpPolling } from './indexer/catchup';
 
@@ -37,6 +39,7 @@ async function main(): Promise<void> {
 
   // Graceful shutdown — registered early so it fires during retry loops
   let redisClient: ReturnType<typeof createRedisClient> extends Promise<infer T> ? T : never;
+  let openSearchClient: (ReturnType<typeof createOpenSearchClient> extends Promise<infer T> ? T : never) | null = null;
   let redisInfoServer: Server | null = null;
   const shutdown = async () => {
     console.log('indexer stopping...');
@@ -45,6 +48,11 @@ async function main(): Promise<void> {
       await closeRedisInfoServer(redisInfoServer);
     } catch (err) {
       console.warn('redis info site close failed:', err);
+    }
+    try {
+      await closeOpenSearchClient(openSearchClient);
+    } catch (err) {
+      console.warn('opensearch close failed:', err);
     }
     try {
       await closeRedisClient(redisClient);
@@ -69,30 +77,40 @@ async function main(): Promise<void> {
   await ensureSchemas(redisClient, config.CHAIN_ID);
   console.log('schema ready');
 
+  if (config.SEARCH_BACKEND === 'opensearch') {
+    openSearchClient = await withRetry('opensearch ready', async () => {
+      const client = await createOpenSearchClient({ OPENSEARCH_URL: config.OPENSEARCH_URL });
+      return client;
+    });
+    await ensureOpenSearchSchemas(openSearchClient, config.CHAIN_ID, config.OPENSEARCH_INDEX_PREFIX);
+    console.log('opensearch schema ready');
+  }
+
   if (args.includes('--init-schema-only')) {
+    await closeOpenSearchClient(openSearchClient);
     await closeRedisClient(redisClient);
     return;
   }
 
-  redisInfoServer = startRedisInfoServer(redisClient);
+  redisInfoServer = startRedisInfoServer(redisClient, openSearchClient);
 
   // Connect to Besu HTTP with retry
   const httpProvider = await withRetry('besu ready', () => createHttpProvider());
   console.log('besu ready');
 
   // Run initial catch-up
-  await runCatchUp(redisClient, httpProvider);
+  await runCatchUp(redisClient, openSearchClient, httpProvider);
 
   // Start WebSocket subscription (non-blocking)
   try {
     const wsProvider = await createWsProvider();
-    await startWsSubscription(wsProvider, redisClient, httpProvider);
+    await startWsSubscription(wsProvider, redisClient, openSearchClient, httpProvider);
   } catch (err) {
     console.warn('WebSocket subscription failed, continuing with HTTP polling only:', err);
   }
 
   // Start HTTP polling
-  startHttpPolling(redisClient, httpProvider, config.POLL_INTERVAL_MS);
+  startHttpPolling(redisClient, openSearchClient, httpProvider, config.POLL_INTERVAL_MS);
 
   console.log('indexer running');
 }

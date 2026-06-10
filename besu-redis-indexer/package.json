@@ -9,6 +9,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@opensearch-project/opensearch": "^3",
     "ethers": "^6",
     "redis": "^4",
     "dotenv": "^16"

@@ -2,6 +2,8 @@ import http, { Server } from 'http';
 import { createClient } from 'redis';
 import { config } from '../config';
 import { PROGRESS_CHANNEL, readProgressSnapshot } from './progress';
+import { OpenSearchClient } from '../opensearch/client';
+import { searchOpenSearch, SearchResponse, SearchResult } from '../opensearch/search';
 
 type RedisClient = ReturnType<typeof createClient>;
 type SearchIndex = 'blocks' | 'txs' | 'events';
@@ -20,6 +22,40 @@ const EVENT_NAMES = new Set([
   'AccountFlagged',
   'FileRegistered',
 ]);
+const EVENT_SEARCH_FIELDS = new Set([
+  'eventName',
+  'assetId',
+  'owner',
+  'borrower',
+  'lender',
+  'account',
+  'txHash',
+  'fileHash',
+  'reason',
+  'fileURI',
+]);
+const EVENT_TEXT_FIELDS = new Set(['reason', 'fileURI']);
+const EVENT_SEARCH_FIELD_ALIASES: Record<string, string> = {
+  event: 'eventName',
+  eventname: 'eventName',
+  asset: 'assetId',
+  assetid: 'assetId',
+  asset_id: 'assetId',
+  owner: 'owner',
+  borrower: 'borrower',
+  borower: 'borrower',
+  lender: 'lender',
+  account: 'account',
+  tx: 'txHash',
+  txhash: 'txHash',
+  tx_hash: 'txHash',
+  file: 'fileURI',
+  fileuri: 'fileURI',
+  file_uri: 'fileURI',
+  filehash: 'fileHash',
+  file_hash: 'fileHash',
+  reason: 'reason',
+};
 
 interface RedisInfo {
   generatedAt: string;
@@ -42,21 +78,7 @@ interface RedisInfo {
   error?: string;
 }
 
-interface SearchResult {
-  key: string;
-  fields: Record<string, string>;
-}
-
-interface SearchResponse {
-  query: string;
-  index: SearchIndex;
-  command: string;
-  total: number;
-  returned: number;
-  results: SearchResult[];
-}
-
-export function startRedisInfoServer(client: RedisClient): Server {
+export function startRedisInfoServer(client: RedisClient, openSearchClient: OpenSearchClient | null): Server {
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
 
@@ -85,7 +107,7 @@ export function startRedisInfoServer(client: RedisClient): Server {
       }
 
       if (url.pathname === '/api/search') {
-        const result = await searchRedis(client, url);
+        const result = await searchDocuments(client, openSearchClient, url);
         sendJson(res, result.statusCode, result.body);
         return;
       }
@@ -207,8 +229,9 @@ async function collectRedisInfo(client: RedisClient): Promise<RedisInfo> {
   };
 }
 
-async function searchRedis(
+async function searchDocuments(
   client: RedisClient,
+  openSearchClient: OpenSearchClient | null,
   url: URL
 ): Promise<{ statusCode: number; body: SearchResponse | { error: string } }> {
   const query = (url.searchParams.get('q') ?? '').trim();
@@ -217,7 +240,36 @@ async function searchRedis(
   }
 
   const index = parseSearchIndex(url.searchParams.get('index'));
+  if (config.SEARCH_BACKEND === 'opensearch') {
+    if (!openSearchClient) {
+      return { statusCode: 503, body: { error: 'OpenSearch client is not available' } };
+    }
 
+    try {
+      return {
+        statusCode: 200,
+        body: await searchOpenSearch(
+          openSearchClient,
+          config.CHAIN_ID,
+          config.OPENSEARCH_INDEX_PREFIX,
+          index,
+          query
+        ),
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { statusCode: 503, body: { error: message } };
+    }
+  }
+
+  return searchRedis(client, index, query);
+}
+
+async function searchRedis(
+  client: RedisClient,
+  index: SearchIndex,
+  query: string
+): Promise<{ statusCode: number; body: SearchResponse | { error: string } }> {
   try {
     if (index === 'txs') {
       return { statusCode: 200, body: await searchTransactions(client, query) };
@@ -281,6 +333,14 @@ function buildSearchCommand(index: Exclude<SearchIndex, 'txs'>, query: string): 
 }
 
 function buildEventsQuery(query: string): string {
+  const scoped = parseScopedEventQuery(query);
+  if (scoped) {
+    const value = scoped.isText ? escapeTextValue(scoped.value) : escapeTagValue(scoped.value);
+    return scoped.isText
+      ? `@${scoped.field}:${value}*`
+      : `@${scoped.field}:{${value}}`;
+  }
+
   if (EVENT_NAMES.has(query)) {
     return `@eventName:{${escapeTagValue(query)}}`;
   }
@@ -299,6 +359,22 @@ function buildEventsQuery(query: string): string {
     `@reason:${textValue}*`,
     `@fileURI:${textValue}*`,
   ].join(' | ')})`;
+}
+
+function parseScopedEventQuery(query: string): { field: string; value: string; isText: boolean } | null {
+  const match = query.match(/^([A-Za-z][A-Za-z0-9_]*):(.*)$/);
+  if (!match) return null;
+
+  const [, field, rawValue] = match;
+  const canonicalField = EVENT_SEARCH_FIELD_ALIASES[field.toLowerCase()] ?? field;
+  const value = rawValue.trim();
+  if (!EVENT_SEARCH_FIELDS.has(canonicalField) || !value) return null;
+
+  return {
+    field: canonicalField,
+    value,
+    isText: EVENT_TEXT_FIELDS.has(canonicalField),
+  };
 }
 
 function buildBlocksQuery(query: string): string {
@@ -463,6 +539,7 @@ function sendHtml(res: http.ServerResponse, html: string, statusCode = 200): voi
 
 function renderDashboard(info: RedisInfo): string {
   const initialInfoJson = serializeForScript(info);
+  const searchBackendLabel = config.SEARCH_BACKEND === 'opensearch' ? 'OpenSearch' : 'Redis Search';
   const indexRows = info.indexes
     .map((index) => `<tr><th>${escapeHtml(index.name)}</th><td>${formatNullable(index.count)}</td></tr>`)
     .join('');
@@ -628,7 +705,7 @@ function renderDashboard(info: RedisInfo): string {
       gap: 8px;
       margin-top: 12px;
     }
-    .event-preset {
+    .event-preset, .field-chip {
       border: 1px solid var(--line);
       border-radius: 999px;
       background: #ffffff;
@@ -639,6 +716,32 @@ function renderDashboard(info: RedisInfo): string {
     }
     .event-preset:hover { border-color: var(--accent); color: var(--accent); }
     .event-preset.fraud { border-color: #f2b8b5; color: var(--danger); background: #fffafa; }
+    .field-filters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--line);
+    }
+    .field-chip {
+      background: #f8fafc;
+    }
+    .field-chip:hover, .field-chip.active {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+    .search-hint {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .search-hint code {
+      color: #243447;
+      font: 700 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
     .command {
       display: none;
       margin: 12px 0 0;
@@ -718,7 +821,7 @@ function renderDashboard(info: RedisInfo): string {
     </section>
 
     <section class="panel">
-      <h2>Redis Search</h2>
+      <h2>${searchBackendLabel}</h2>
       <div class="search-body">
         <div class="tabs" role="tablist" aria-label="Search index">
           <button class="tab-button" type="button" data-search-index="blocks">Blocks</button>
@@ -726,7 +829,7 @@ function renderDashboard(info: RedisInfo): string {
           <button class="tab-button active" type="button" data-search-index="events">Events</button>
         </div>
         <form id="search-form" class="search-form">
-          <input id="search-input" class="search-input" name="q" type="search" placeholder="Search by event name, borrower, assetId..." autocomplete="off">
+          <input id="search-input" class="search-input" name="q" type="search" placeholder="Search events by assetId, owner, borrower, lender..." autocomplete="off">
           <button class="search-button" type="submit">Search</button>
         </form>
         <div id="event-presets" class="event-presets" aria-label="Predefined events">
@@ -737,8 +840,17 @@ function renderDashboard(info: RedisInfo): string {
           <button class="event-preset fraud" type="button" data-event-name="AccountFlagged">AccountFlagged</button>
           <button class="event-preset" type="button" data-event-name="FileRegistered">FileRegistered</button>
         </div>
+        <div id="field-filters" class="field-filters" aria-label="Event field filters">
+          <button class="field-chip" type="button" data-event-field="assetId">assetId</button>
+          <button class="field-chip" type="button" data-event-field="owner">owner</button>
+          <button class="field-chip" type="button" data-event-field="borrower">borrower</button>
+          <button class="field-chip" type="button" data-event-field="lender">lender</button>
+          <button class="field-chip" type="button" data-event-field="account">account</button>
+          <button class="field-chip" type="button" data-event-field="txHash">txHash</button>
+        </div>
+        <div id="search-hint" class="search-hint">Use a field prefix for exact event searches, for example <code>assetId:1</code>, <code>owner:0x...</code>, <code>borrower:0x...</code>, or <code>lender:0x...</code>.</div>
         <pre id="search-command" class="command"></pre>
-        <div id="search-message" class="search-message">Enter a query to search Redis indexes.</div>
+        <div id="search-message" class="search-message">Enter a query to search ${searchBackendLabel}.</div>
         <div id="search-results" class="results-grid"></div>
       </div>
     </section>
@@ -789,7 +901,7 @@ function renderDashboard(info: RedisInfo): string {
     const searchPlaceholders = {
       blocks: 'Search by block number, hash...',
       txs: 'Search by tx hash, from/to address...',
-      events: 'Search by event name, borrower, assetId...'
+      events: 'Search events by assetId, owner, borrower, lender...'
     };
     let activeSearchIndex = 'events';
     let snapshotState = null;
@@ -919,6 +1031,17 @@ function renderDashboard(info: RedisInfo): string {
       snapshotState.stats.eventsIndexed += event.eventNames.length;
       snapshotState.stats.fraudDetected += countFraud(event.eventNames);
       snapshotState.stats.lastBlockAt = event.ts;
+      const eventHeadBlock = parseNumber(event.headBlockNumber);
+      const currentHeadBlock = parseNumber(snapshotState.head && snapshotState.head.blockNumber);
+      const nextHeadBlock = eventHeadBlock !== null
+        ? eventHeadBlock
+        : currentHeadBlock !== null
+          ? Math.max(currentHeadBlock, event.blockNumber)
+          : event.blockNumber;
+      snapshotState.head = {
+        blockNumber: nextHeadBlock,
+        timestamp: event.ts
+      };
       snapshotState.cursor = Object.assign({}, snapshotState.cursor || {}, {
         lastBlockNumber: String(event.blockNumber),
         updatedAt: event.ts
@@ -956,14 +1079,24 @@ function renderDashboard(info: RedisInfo): string {
     function setupSearch() {
       const tabs = Array.from(document.querySelectorAll('[data-search-index]'));
       const eventPresets = Array.from(document.querySelectorAll('[data-event-name]'));
+      const fieldChips = Array.from(document.querySelectorAll('[data-event-field]'));
       const eventPresetWrap = document.getElementById('event-presets');
+      const fieldFilterWrap = document.getElementById('field-filters');
+      const searchHint = document.getElementById('search-hint');
       const input = document.getElementById('search-input');
       const form = document.getElementById('search-form');
       if (!input || !form) return;
 
       const syncEventPresets = () => {
+        const isEventSearch = activeSearchIndex === 'events';
         if (eventPresetWrap) {
-          eventPresetWrap.style.display = activeSearchIndex === 'events' ? 'flex' : 'none';
+          eventPresetWrap.style.display = isEventSearch ? 'flex' : 'none';
+        }
+        if (fieldFilterWrap) {
+          fieldFilterWrap.style.display = isEventSearch ? 'flex' : 'none';
+        }
+        if (searchHint) {
+          searchHint.style.display = isEventSearch ? 'block' : 'none';
         }
       };
 
@@ -993,6 +1126,32 @@ function renderDashboard(info: RedisInfo): string {
         });
       }
 
+      for (const chip of fieldChips) {
+        chip.addEventListener('click', () => {
+          const fieldName = chip.getAttribute('data-event-field') || '';
+          activeSearchIndex = 'events';
+          for (const button of tabs) {
+            button.classList.toggle('active', button.getAttribute('data-search-index') === 'events');
+          }
+          for (const button of fieldChips) {
+            button.classList.toggle('active', button === chip);
+          }
+          input.placeholder = fieldName + ':value';
+          input.value = fieldName + ':';
+          input.focus();
+          input.setSelectionRange(input.value.length, input.value.length);
+          syncEventPresets();
+          clearSearch(false);
+        });
+      }
+
+      input.addEventListener('input', () => {
+        const fieldName = input.value.split(':', 1)[0];
+        for (const button of fieldChips) {
+          button.classList.toggle('active', button.getAttribute('data-event-field') === fieldName);
+        }
+      });
+
       form.addEventListener('submit', (event) => {
         event.preventDefault();
         void runSearch(input.value);
@@ -1009,7 +1168,7 @@ function renderDashboard(info: RedisInfo): string {
         command.textContent = '';
       }
       if (results) results.textContent = '';
-      setSearchMessage('Enter a query to search Redis indexes.');
+      setSearchMessage('Enter a query to search ${searchBackendLabel}.');
       if (clearInput) {
         const input = document.getElementById('search-input');
         if (input) input.value = '';
@@ -1020,7 +1179,7 @@ function renderDashboard(info: RedisInfo): string {
       const query = rawQuery.trim();
       if (!query) {
         clearSearch(false);
-        setSearchMessage('Enter a query to search Redis indexes.');
+        setSearchMessage('Enter a query to search ${searchBackendLabel}.');
         return;
       }
 
@@ -1088,6 +1247,11 @@ function renderDashboard(info: RedisInfo): string {
       const rows = [
         ['block', fields.blockNumber],
         ['tx', truncateMiddle(fields.txHash)],
+        ['assetId', fields.assetId],
+        ['owner', truncateMiddle(fields.owner)],
+        ['borrower', truncateMiddle(fields.borrower)],
+        ['lender', truncateMiddle(fields.lender)],
+        ['account', truncateMiddle(fields.account)],
       ];
 
       switch (fields.eventName) {
@@ -1096,18 +1260,11 @@ function renderDashboard(info: RedisInfo): string {
           rows.push(['reason', fields.reason]);
           break;
         case 'FinancingRecorded':
-          rows.push(['borrower', truncateMiddle(fields.borrower)]);
-          rows.push(['lender', truncateMiddle(fields.lender)]);
-          break;
-        case 'AssetRegistered':
-          rows.push(['assetId', fields.assetId]);
-          rows.push(['owner', truncateMiddle(fields.owner)]);
-          break;
-        case 'LienReleased':
-          rows.push(['assetId', fields.assetId]);
+          rows.push(['amountWei', fields.amountWei]);
           break;
         case 'FileRegistered':
           rows.push(['fileURI', fields.fileURI]);
+          rows.push(['fileHash', truncateMiddle(fields.fileHash)]);
           break;
         default:
           rows.push(['key', result.key]);
