@@ -83,6 +83,7 @@ export default function Home() {
   const [verifyAssetId, setVerifyAssetId] = useState('');
   const [verifyHash, setVerifyHash] = useState('');
   const [flagged, setFlagged] = useState<string[]>([]);
+  const [showConfirmClear, setShowConfirmClear] = useState(false);
   const [events, setEvents] = useState<string[]>(['Ready. Start by checking backend health, then register an asset.']);
   const [result, setResult] = useState<Result>();
   const [isPending, startTransition] = useTransition();
@@ -141,7 +142,7 @@ export default function Home() {
   }
 
   async function clearFlaggedAccounts() {
-    if (!confirm('Clear all flagged accounts?')) return;
+    setShowConfirmClear(false);
     await run(async () => {
       await backend('/accounts/flagged/clear', { method: 'POST', body: '{}' });
       const data = await backend<{ accounts: string[] }>('/accounts/flagged');
@@ -162,17 +163,15 @@ export default function Home() {
       {/* COMMAND HEADER */}
       <section className="hero">
         <div className="hero-content">
-          <p className="eyebrow">Hyperledger Besu Protocol</p>
           <h1>Double Financing Preventer</h1>
           <p className="subtitle">
-            Control center for registering asset liens, detecting duplicate financing attempts,
-            and verifying off-chain file hashes against on-chain records.
+            Learn how to register asset liens, detect duplicate financing on-chain,
+            and verify off-chain file hashes against Ethereum records — all through a local dev proxy.
           </p>
         </div>
         <div className="hero-status">
           <StatusIndicator ok={health.ok} label={health.message} />
-          <StatusIndicator ok={true} label="API Proxy /api/backend" />
-          <StatusIndicator ok={true} label="Signed by backend" />
+          <StatusIndicator ok={true} label="API Proxy active" />
           <button onClick={checkHealth} className="secondary" disabled={isPending}>
             Refresh Status
           </button>
@@ -180,20 +179,23 @@ export default function Home() {
       </section>
 
       {/* MAIN GRID */}
-      <div className="grid two" style={{ marginTop: '1.25rem' }}>
+      <div className="grid two">
         {/* ASSET LOOKUP */}
         <form className="card wide" onSubmit={lookupAsset}>
           <h2>Asset Lookup</h2>
+          <label htmlFor="lookupId" className="field-label">Asset ID</label>
           <div className="row">
             <input
+              id="lookupId"
               value={lookupId}
               onChange={(event) => setLookupId(event.target.value)}
-              placeholder="Asset ID"
+              placeholder="e.g. 1"
               min="1"
               type="number"
             />
-            <button disabled={isPending || !lookupId}>Lookup</button>
+            <button disabled={isPending || !lookupId}>Lookup asset</button>
           </div>
+          <span className="hint">Numeric ID of the asset to inspect. {(!lookupId) && 'Enter an ID to enable lookup.'}</span>
           <div className="asset-panel">
             {asset ? (
               <>
@@ -245,7 +247,7 @@ export default function Home() {
                 )}
               </>
             ) : (
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+              <p className="hint">
                 Enter an asset ID to inspect its financing state.
               </p>
             )}
@@ -255,18 +257,36 @@ export default function Home() {
         {/* FRAUD ALERTS */}
         <div className="card">
           <h2>Fraud Alerts</h2>
-          <div className="button-row" style={{ marginTop: 0 }}>
-            <button onClick={refreshFlagged} disabled={isPending} className="secondary">
-              Refresh
-            </button>
-            <button
-              className="danger-button"
-              onClick={clearFlaggedAccounts}
-              disabled={isPending || flagged.length === 0}
-            >
-              Clear All
-            </button>
-          </div>
+          {showConfirmClear ? (
+            <div style={{ marginBottom: '1rem', padding: '1rem', background: 'var(--danger-muted)', border: '1px solid var(--danger)', borderRadius: 'var(--radius-md)' }}>
+              <p style={{ fontSize: '0.82rem', marginBottom: '0.75rem', color: 'var(--text-primary)' }}>Are you sure you want to clear all flagged accounts?</p>
+              <div className="button-row" style={{ marginTop: 0 }}>
+                <button onClick={() => setShowConfirmClear(false)} disabled={isPending} className="secondary">
+                  Cancel
+                </button>
+                <button
+                  className="danger-button"
+                  onClick={clearFlaggedAccounts}
+                  disabled={isPending}
+                >
+                  Confirm Clear
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="button-row" style={{ marginTop: 0 }}>
+              <button onClick={refreshFlagged} disabled={isPending} className="secondary">
+                Refresh flagged accounts
+              </button>
+              <button
+                className="danger-button"
+                onClick={() => setShowConfirmClear(true)}
+                disabled={isPending || flagged.length === 0}
+              >
+                Clear flagged accounts
+              </button>
+            </div>
+          )}
           <div className="list">
             {flagged.length ? (
               flagged.map((account) => (
@@ -294,15 +314,18 @@ export default function Home() {
           }}
         >
           <h2>Register Asset</h2>
+          <label htmlFor="registerId" className="field-label">Asset ID</label>
           <input
+            id="registerId"
             value={registerId}
             onChange={(event) => setRegisterId(event.target.value)}
-            placeholder="Asset ID"
+            placeholder="e.g. 1"
             min="1"
             type="number"
             required
           />
-          <button disabled={isPending || !registerId}>Register</button>
+          <span className="hint">Numeric ID for the new asset. {(!registerId) && 'Enter an ID to register.'}</span>
+          <button disabled={isPending || !registerId}>Register asset</button>
         </form>
 
         <form
@@ -319,24 +342,29 @@ export default function Home() {
           }}
         >
           <h2>Request Financing</h2>
+          <label htmlFor="financeId" className="field-label">Asset ID</label>
           <input
+            id="financeId"
             value={financeId}
             onChange={(event) => setFinanceId(event.target.value)}
-            placeholder="Asset ID"
+            placeholder="e.g. 1"
             min="1"
             type="number"
             required
           />
+          <label htmlFor="financeAmount" className="field-label">Amount (ETH)</label>
           <input
+            id="financeAmount"
             value={financeAmount}
             onChange={(event) => setFinanceAmount(event.target.value)}
-            placeholder="Amount in ETH"
+            placeholder="e.g. 1.5"
             min="0"
             step="0.01"
             type="number"
             required
           />
-          <button disabled={isPending || !financeId || !financeAmount}>Pledge Asset</button>
+          <span className="hint">Amount in ETH to pledge. {(!financeId || !financeAmount) && 'Fill both fields to pledge.'}</span>
+          <button disabled={isPending || !financeId || !financeAmount}>Request financing</button>
         </form>
 
         <form
@@ -353,24 +381,29 @@ export default function Home() {
           }}
         >
           <h2>Repay Lien</h2>
+          <label htmlFor="repayId" className="field-label">Asset ID</label>
           <input
+            id="repayId"
             value={repayId}
             onChange={(event) => setRepayId(event.target.value)}
-            placeholder="Asset ID"
+            placeholder="e.g. 1"
             min="1"
             type="number"
             required
           />
+          <label htmlFor="repayAmount" className="field-label">Amount (ETH)</label>
           <input
+            id="repayAmount"
             value={repayAmount}
             onChange={(event) => setRepayAmount(event.target.value)}
-            placeholder="Amount in ETH"
+            placeholder="e.g. 1.5"
             min="0"
             step="0.01"
             type="number"
             required
           />
-          <button disabled={isPending || !repayId || !repayAmount}>Repay & Release</button>
+          <span className="hint">Amount in ETH to repay. {(!repayId || !repayAmount) && 'Fill both fields to repay.'}</span>
+          <button disabled={isPending || !repayId || !repayAmount}>Repay lien</button>
         </form>
       </section>
 
@@ -390,27 +423,38 @@ export default function Home() {
           }}
         >
           <h2>Register File Hash</h2>
+          <label htmlFor="fileAssetId" className="field-label">Asset ID</label>
           <input
+            id="fileAssetId"
             value={fileAssetId}
             onChange={(event) => setFileAssetId(event.target.value)}
-            placeholder="Asset ID"
+            placeholder="e.g. 1"
             min="1"
             type="number"
             required
           />
-          <input type="file" onChange={(event) => void hashSelectedFile(event.target.files?.[0])} />
+          
+          <label htmlFor="fileInput" className="field-label">File to Hash</label>
+          <input id="fileInput" type="file" onChange={(event) => void hashSelectedFile(event.target.files?.[0])} />
+          
+          <label htmlFor="fileURI" className="field-label">IPFS URI</label>
           <input
+            id="fileURI"
             value={fileURI}
             onChange={(event) => setFileURI(event.target.value)}
             placeholder="ipfs://..."
             required
           />
+          <span className="hint">Format: ipfs://&lt;CID&gt;</span>
+
           {fileHash ? (
             <code className="hash">{fileHash}</code>
           ) : (
-            <span className="hint">Select a file to compute SHA-256 hash</span>
+            <span className="hint">Select a file to compute its SHA-256 hash.</span>
           )}
-          <button disabled={isPending || !fileHash || !fileURI}>Register File</button>
+          
+          <span className="hint">{(!fileHash || !fileURI || !fileAssetId) && 'Provide Asset ID, File, and IPFS URI to register.'}</span>
+          <button disabled={isPending || !fileHash || !fileURI || !fileAssetId}>Register file hash</button>
         </form>
 
         <form
@@ -427,21 +471,26 @@ export default function Home() {
           }}
         >
           <h2>Verify File</h2>
+          <label htmlFor="verifyAssetId" className="field-label">Asset ID</label>
           <input
+            id="verifyAssetId"
             value={verifyAssetId}
             onChange={(event) => setVerifyAssetId(event.target.value)}
-            placeholder="Asset ID"
+            placeholder="e.g. 1"
             min="1"
             type="number"
             required
           />
+          <label htmlFor="verifyHash" className="field-label">SHA-256 Hash</label>
           <input
+            id="verifyHash"
             value={verifyHash}
             onChange={(event) => setVerifyHash(event.target.value)}
-            placeholder="SHA-256 hash"
+            placeholder="e.g. a1b2c3..."
             required
           />
-          <button disabled={isPending || !verifyAssetId || !verifyHash}>Verify Hash</button>
+          <span className="hint">64-character hex string. {(!verifyAssetId || !verifyHash) && 'Fill both fields to verify.'}</span>
+          <button disabled={isPending || !verifyAssetId || !verifyHash}>Verify file hash</button>
         </form>
       </section>
 

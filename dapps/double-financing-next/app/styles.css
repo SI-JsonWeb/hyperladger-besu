@@ -47,13 +47,12 @@
   /* Spatial */
   --radius-sm: 0.5rem;
   --radius-md: 0.85rem;
-  --radius-lg: 1.25rem;
-  --radius-xl: 1.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1rem;
 
   /* Shadows */
-  --shadow-card: 0 4px 32px rgba(0, 0, 0, 0.5), 0 1px 0 rgba(245, 166, 35, 0.06) inset;
-  --shadow-glow: 0 0 24px rgba(245, 166, 35, 0.2);
-  --shadow-lift: 0 12px 48px rgba(0, 0, 0, 0.6);
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.2), 0 1px 0 rgba(245, 166, 35, 0.06) inset;
+  --shadow-lift: 0 4px 16px rgba(0, 0, 0, 0.3);
 }
 
 /* --- BODY --- */
@@ -66,33 +65,6 @@ body {
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-}
-
-/* Noise texture overlay */
-body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
-  opacity: 0.025;
-  pointer-events: none;
-  z-index: 9999;
-}
-
-/* Scanline effect */
-body::after {
-  content: '';
-  position: fixed;
-  inset: 0;
-  background: repeating-linear-gradient(
-    0deg,
-    transparent,
-    transparent 2px,
-    rgba(0, 0, 0, 0.08) 2px,
-    rgba(0, 0, 0, 0.08) 4px
-  );
-  pointer-events: none;
-  z-index: 9998;
 }
 
 button,
@@ -238,48 +210,6 @@ h2 {
 .status-indicator.offline .dot {
   background: var(--danger);
   box-shadow: 0 0 8px var(--danger);
-}
-
-/* --- STATUS CARD --- */
-.status-card {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1rem;
-  margin-top: 1.25rem;
-  padding: 0;
-}
-
-.status-item {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  padding: 1rem 1.25rem;
-  background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-card);
-}
-
-.status-item .label {
-  font-size: 0.68rem;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-
-.status-item .value {
-  font-family: var(--font-mono);
-  font-size: 0.82rem;
-  color: var(--text-primary);
-}
-
-.status-item .value.good {
-  color: var(--success);
-}
-
-.status-item .value.bad {
-  color: var(--danger);
 }
 
 /* --- GRID LAYOUTS --- */
@@ -459,14 +389,6 @@ code.address {
   vertical-align: middle;
 }
 
-code.block {
-  display: block;
-  padding: 0.75rem 1rem;
-  border-radius: var(--radius-md);
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-
 .hash {
   display: block;
   background: var(--bg-panel);
@@ -500,12 +422,17 @@ code.block {
   margin-bottom: 0;
 }
 
-.asset-panel .field-label {
+.field-label {
   font-size: 0.68rem;
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--text-muted);
+}
+
+label.field-label {
+  display: block;
+  margin-bottom: -0.25rem;
 }
 
 .asset-panel .field-value {
@@ -540,7 +467,6 @@ code.block {
 .result-box {
   background: var(--bg-panel);
   border: 1px solid var(--border-subtle);
-  border-left: 3px solid var(--text-muted);
   border-radius: var(--radius-md);
   padding: 1rem 1.25rem;
   margin-top: 1rem;
@@ -552,12 +478,12 @@ code.block {
 }
 
 .result-box.success {
-  border-left-color: var(--success);
+  border-color: var(--success);
   background: var(--success-muted);
 }
 
 .result-box.error {
-  border-left-color: var(--danger);
+  border-color: var(--danger);
   background: var(--danger-muted);
 }
 
@@ -632,23 +558,8 @@ form input + button,
   color: var(--success);
 }
 
-.bad,
 .danger {
   color: var(--danger);
-}
-
-/* --- DECORATIVE CORNER ACCENTS --- */
-.card::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 40px;
-  height: 40px;
-  border-top: 1px solid var(--border-subtle);
-  border-right: 1px solid var(--border-subtle);
-  border-top-right-radius: var(--radius-lg);
-  pointer-events: none;
 }
 
 /* --- RESPONSIVE --- */
@@ -667,10 +578,6 @@ form input + button,
     flex-direction: row;
     flex-wrap: wrap;
     align-items: center;
-  }
-
-  .status-card {
-    grid-template-columns: 1fr;
   }
 
   .two,

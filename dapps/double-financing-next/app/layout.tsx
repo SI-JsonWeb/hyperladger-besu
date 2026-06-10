@@ -3,7 +3,7 @@ import './styles.css';
 
 export const metadata: Metadata = {
   title: 'Double Financing Preventer',
-  description: 'Blockchain command center for the DoubleFinancingPreventer protocol',
+  description: 'Developer tutorial console for the DoubleFinancingPreventer protocol',
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
