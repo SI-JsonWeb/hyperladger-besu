@@ -6,6 +6,7 @@ const FRAUD_EVENT_NAMES = new Set(['FraudAttemptDetected', 'AccountFlagged']);
 
 export interface ProgressPayload {
   blockNumber: number;
+  headBlockNumber?: number;
   txCount: number;
   eventNames: string[];
   isFraud: boolean;
@@ -126,6 +127,7 @@ function parseProgressPayload(raw: string): ProgressPayload | null {
 
     return {
       blockNumber: parsed.blockNumber,
+      headBlockNumber: typeof parsed.headBlockNumber === 'number' ? parsed.headBlockNumber : undefined,
       txCount: parsed.txCount,
       eventNames: parsed.eventNames.filter((name): name is string => typeof name === 'string'),
       isFraud: parsed.isFraud,

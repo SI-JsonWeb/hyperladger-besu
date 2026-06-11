@@ -28,7 +28,7 @@ export async function getBlockWithTxs(
     hash: block.hash ?? '',
     parentHash: block.parentHash ?? '',
     timestamp: Number(block.timestamp),
-    transactions: (block.transactions as unknown as TransactionResponse[]) ?? [],
+    transactions: block.prefetchedTransactions,
   };
 }
 

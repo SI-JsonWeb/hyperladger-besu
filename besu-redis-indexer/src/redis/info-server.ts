@@ -662,6 +662,7 @@ function renderDashboard(info: RedisInfo): string {
     }
     .result-card.fraud { border-color: #f2b8b5; background: #fffafa; }
     .result-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 18px; font-weight: 750; line-height: 1.25; overflow-wrap: anywhere; }
+    .result-title span:first-child { min-width: 0; overflow-wrap: anywhere; }
     .badge { border-radius: 999px; background: var(--accent-soft); color: var(--accent); font: 750 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; padding: 4px 7px; white-space: nowrap; }
     .badge.danger { background: var(--danger-soft); color: var(--danger); }
     .result-fields { display: grid; gap: 8px; margin-top: 12px; }
@@ -800,13 +801,6 @@ function renderDashboard(info: RedisInfo): string {
       if (el) el.textContent = value;
     }
 
-    function truncateMiddle(value, head = 10, tail = 6) {
-      if (!value) return '-';
-      const text = String(value);
-      if (text.length <= head + tail + 3) return text;
-      return text.slice(0, head) + '...' + text.slice(-tail);
-    }
-
     function formatNumber(value) {
       return typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString('en-US') : '-';
     }
@@ -919,6 +913,17 @@ function renderDashboard(info: RedisInfo): string {
       snapshotState.stats.eventsIndexed += event.eventNames.length;
       snapshotState.stats.fraudDetected += countFraud(event.eventNames);
       snapshotState.stats.lastBlockAt = event.ts;
+      const currentHeadBlock = parseNumber(snapshotState.head && snapshotState.head.blockNumber);
+      const eventHeadBlock = parseNumber(event.headBlockNumber);
+      const nextHeadBlock = eventHeadBlock !== null
+        ? eventHeadBlock
+        : currentHeadBlock !== null
+          ? Math.max(currentHeadBlock, event.blockNumber)
+          : event.blockNumber;
+      snapshotState.head = {
+        blockNumber: nextHeadBlock,
+        timestamp: event.ts
+      };
       snapshotState.cursor = Object.assign({}, snapshotState.cursor || {}, {
         lastBlockNumber: String(event.blockNumber),
         updatedAt: event.ts
@@ -1087,7 +1092,7 @@ function renderDashboard(info: RedisInfo): string {
       if (isFraud) card.classList.add('fraud');
       const rows = [
         ['block', fields.blockNumber],
-        ['tx', truncateMiddle(fields.txHash)],
+        ['tx', fields.txHash],
       ];
 
       switch (fields.eventName) {
@@ -1096,12 +1101,12 @@ function renderDashboard(info: RedisInfo): string {
           rows.push(['reason', fields.reason]);
           break;
         case 'FinancingRecorded':
-          rows.push(['borrower', truncateMiddle(fields.borrower)]);
-          rows.push(['lender', truncateMiddle(fields.lender)]);
+          rows.push(['borrower', fields.borrower]);
+          rows.push(['lender', fields.lender]);
           break;
         case 'AssetRegistered':
           rows.push(['assetId', fields.assetId]);
-          rows.push(['owner', truncateMiddle(fields.owner)]);
+          rows.push(['owner', fields.owner]);
           break;
         case 'LienReleased':
           rows.push(['assetId', fields.assetId]);
@@ -1124,7 +1129,7 @@ function renderDashboard(info: RedisInfo): string {
       appendResultRows(card, [
         ['timestamp', timestamp === null ? '-' : new Date(timestamp * 1000).toLocaleString()],
         ['txCount', fields.txCount],
-        ['hash', truncateMiddle(fields.hash)],
+        ['hash', fields.hash],
       ]);
       return card;
     }
@@ -1132,12 +1137,12 @@ function renderDashboard(info: RedisInfo): string {
     function createTxCard(result) {
       const fields = result.fields || {};
       const status = fields.status === '0' ? 'failed' : 'success';
-      const card = createBaseResultCard(truncateMiddle(fields.hash || result.key), status);
+      const card = createBaseResultCard(fields.hash || result.key, status);
       const badge = card.querySelector('.badge');
       if (badge && status === 'failed') badge.classList.add('danger');
       appendResultRows(card, [
-        ['from', truncateMiddle(fields.from)],
-        ['to', truncateMiddle(fields.to)],
+        ['from', fields.from],
+        ['to', fields.to],
         ['valueWei', fields.valueWei],
         ['block', fields.blockNumber],
       ]);

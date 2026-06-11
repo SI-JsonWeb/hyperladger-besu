@@ -45,7 +45,8 @@ export function createSingleFlightGuard(): SingleFlightGuard {
 async function processBlock(
   client: RedisClient,
   provider: JsonRpcProvider,
-  block: BlockWithTxs
+  block: BlockWithTxs,
+  headBlockNumber: number
 ): Promise<void> {
   const chainId = config.CHAIN_ID;
   const blockKey = `besu:block:${chainId}:${block.number}`;
@@ -96,6 +97,7 @@ async function processBlock(
   const ts = new Date().toISOString();
   await recordBlockProgress(client, chainId, {
     blockNumber: block.number,
+    headBlockNumber,
     txCount: block.transactions.length,
     eventNames,
     isFraud: eventNames.some(isFraudEventName),
@@ -126,7 +128,7 @@ export async function runCatchUp(
   for (let blockNumber = startBlock; blockNumber <= currentBlock; blockNumber++) {
     const block = await getBlockWithTxs(provider, blockNumber);
     if (!block) continue;
-    await processBlock(client, provider, block);
+    await processBlock(client, provider, block, currentBlock);
   }
 
   console.log(`catchup from ${startBlock} to ${currentBlock} complete`);
