@@ -1,6 +1,6 @@
 # Besu Redis 8 Indexer
 
-Read-only daemon that indexes public Besu blocks/transactions and DoubleFinancingPreventer events into Redis 8.
+Read-only daemon that indexes public Besu blocks/transactions and DoubleFinancingPreventer events into Redis 8, with OpenSearch as the default query backend.
 
 ## Quick Start
 
@@ -9,14 +9,14 @@ Read-only daemon that indexes public Besu blocks/transactions and DoubleFinancin
 cd besu-redis-indexer
 npm install
 npm run build
-# Start Redis 8 on localhost:6379 first, then:
+# Start Redis 8 on localhost:6379 and OpenSearch on localhost:9200 first, then:
 node dist/main.js
 ```
 
 ### Docker Compose
 ```bash
 cd quorum-test-network
-docker compose up -d redis besu-redis-indexer
+docker compose up -d redis opensearch besu-redis-indexer
 docker compose logs -f besu-redis-indexer
 ```
 
@@ -27,6 +27,9 @@ docker compose logs -f besu-redis-indexer
 | RPC_HTTP_URL | http://127.0.0.1:8545 | Besu HTTP RPC |
 | RPC_WS_URL | ws://127.0.0.1:8546 | Besu WebSocket RPC |
 | REDIS_URL | redis://127.0.0.1:6379 | Redis connection URL |
+| SEARCH_BACKEND | opensearch | Search backend: `opensearch` or `redis` |
+| OPENSEARCH_URL | http://127.0.0.1:9200 | OpenSearch connection URL |
+| OPENSEARCH_INDEX_PREFIX | besu | Prefix for OpenSearch index names |
 | CHAIN_ID | 1337 | Chain identifier |
 | CONTRACT_ADDRESS | (from deployment.json) | DoubleFinancingPreventer address |
 | CONTRACT_START_BLOCK | (from deployment.json) | Block when contract was deployed |
@@ -37,7 +40,7 @@ docker compose logs -f besu-redis-indexer
 ## CLI Flags
 
 - `--print-config`: Print configuration and exit (no connections)
-- `--init-schema-only`: Initialize Redis indexes and exit
+- `--init-schema-only`: Initialize Redis Search and OpenSearch indexes, then exit
 
 ## Redis Data Model
 
@@ -60,11 +63,17 @@ Set `REDIS_INFO_HOST` and `REDIS_INFO_PORT` to change the bind address.
 | `besu:tx:{chainId}:{txHash}` | Transaction data |
 | `dfp:event:{chainId}:{blockNumber}:{txIndex}:{logIndex}` | Contract event |
 
-### Redis Search Indexes
+### Search Indexes
 
 - `idx:besu_blocks` — over `besu:block:` keys
 - `idx:besu_txs` — over `besu:tx:` keys
 - `idx:dfp_events` — over `dfp:event:` keys
+
+OpenSearch mirrors the same document families into:
+
+- `besu-blocks-{chainId}`
+- `besu-txs-{chainId}`
+- `besu-events-{chainId}`
 
 ### Redis Streams (at-least-once notifications)
 
@@ -85,7 +94,13 @@ docker compose exec redis redis-cli INFO server | grep redis_version
 # Check FT indexes exist
 docker compose exec redis redis-cli FT._LIST
 
-# Search for fraud events
+# Check OpenSearch health
+curl http://127.0.0.1:9200
+
+# Check OpenSearch indices
+curl http://127.0.0.1:9200/_cat/indices/besu-*?v
+
+# Search Redis fallback indexes
 docker compose exec redis redis-cli FT.SEARCH idx:dfp_events '@eventName:{FraudAttemptDetected}'
 
 # Search for file events
@@ -101,12 +116,13 @@ docker compose exec redis redis-cli HGETALL indexer:1337:cursor
 ## Architecture
 
 - WS subscription only triggers HTTP catch-up (WS is non-durable)
-- Cursor updates after all Redis writes succeed per block
+- Cursor updates after Redis writes and configured OpenSearch writes succeed per block
 - Deterministic HASH keys prevent duplication on restart
+- Deterministic OpenSearch document IDs prevent duplication on restart
 - Streams are at-least-once notifications, not source of truth
 
 ## Scope Notes
 
 - Public blocks/transactions only — private Tessera/member data is NOT indexed
-- Redis is a searchable cache — Besu remains authoritative
-- No REST API is provided
+- Redis and OpenSearch are rebuildable read models — Besu remains authoritative
+- The dashboard exposes `/api/search` for local query use

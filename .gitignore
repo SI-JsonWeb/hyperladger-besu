@@ -13,3 +13,4 @@ config/ethsigner/password
 config/nodes/
 /smart_contracts/node_modules
 /.omo
+/dapps/double-financing-next/dev.log
