@@ -1,0 +1,111 @@
+services:
+  dc2-node7:
+    image: hyperledger/besu:26.6.0
+    container_name: besu-dc2-node7
+    user: root
+    ports:
+      - "8551:8545"
+    volumes:
+      - ./node7/keys:/opt/besu/keys
+      - ../all-genesis.json:/opt/besu/genesis.json
+      - dc2-node7-data:/opt/besu/data
+    command: >
+      --genesis-file=/opt/besu/genesis.json
+      --node-private-key-file=/opt/besu/keys/key
+      --data-path=/opt/besu/data
+      --p2p-host=172.22.0.8
+      --p2p-port=30303
+      --bootnodes=enode://a4cd35ca43bd9d232bd0b0f09c17aa6ec3dbd0c26c07b5d1c428ba68b9d96a7a2e19cd6eff391bd513705fdef2374cdc35b507df428bbeb5e577e81fc7711e90@172.22.0.2:30303
+      --rpc-http-enabled
+      --rpc-http-api=ETH,NET,QBFT,WEB3
+      --rpc-http-host=0.0.0.0
+      --rpc-http-port=8545
+      --rpc-http-cors-origins=all
+      --host-allowlist=*
+      --min-gas-price=0
+      --tx-pool-min-gas-price=0
+    networks:
+      besu-internal:
+        ipv4_address: 172.21.0.2
+      besu-shared:
+        ipv4_address: 172.22.0.8
+
+  dc2-node8:
+    image: hyperledger/besu:26.6.0
+    container_name: besu-dc2-node8
+    user: root
+    depends_on:
+      - dc2-node7
+    ports:
+      - "8552:8545"
+    volumes:
+      - ./node8/keys:/opt/besu/keys
+      - ../all-genesis.json:/opt/besu/genesis.json
+      - dc2-node8-data:/opt/besu/data
+    command: >
+      --genesis-file=/opt/besu/genesis.json
+      --node-private-key-file=/opt/besu/keys/key
+      --data-path=/opt/besu/data
+      --p2p-host=172.22.0.9
+      --p2p-port=30303
+      --bootnodes=enode://157f4a2b6c693731d98878d18a25ed6a13189c9f0027f0c3e1ab10f7a150a2872c2934c4d3907915face64ec4aab0768498e66afbc7c60efabb9b5f7b84202cf@172.21.0.2:30303
+      --rpc-http-enabled
+      --rpc-http-api=ETH,NET,QBFT,WEB3
+      --rpc-http-host=0.0.0.0
+      --rpc-http-port=8545
+      --rpc-http-cors-origins=all
+      --host-allowlist=*
+      --min-gas-price=0
+      --tx-pool-min-gas-price=0
+    networks:
+      besu-internal:
+        ipv4_address: 172.21.0.3
+      besu-shared:
+        ipv4_address: 172.22.0.9
+  
+  dc2-node9:
+    image: hyperledger/besu:26.6.0
+    container_name: besu-dc2-node9
+    user: root
+    depends_on:
+      - dc2-node7
+    ports:
+      - "8553:8545"
+    volumes:
+      - ./node9/keys:/opt/besu/keys
+      - ../all-genesis.json:/opt/besu/genesis.json
+      - dc2-node9-data:/opt/besu/data
+    command: >
+      --genesis-file=/opt/besu/genesis.json
+      --node-private-key-file=/opt/besu/keys/key
+      --data-path=/opt/besu/data
+      --p2p-host=172.22.0.10
+      --p2p-port=30303
+      --bootnodes=enode://157f4a2b6c693731d98878d18a25ed6a13189c9f0027f0c3e1ab10f7a150a2872c2934c4d3907915face64ec4aab0768498e66afbc7c60efabb9b5f7b84202cf@172.21.0.2:30303
+      --rpc-http-enabled
+      --rpc-http-api=ETH,NET,QBFT,WEB3
+      --rpc-http-host=0.0.0.0
+      --rpc-http-port=8545
+      --rpc-http-cors-origins=all
+      --host-allowlist=*
+      --min-gas-price=0
+      --tx-pool-min-gas-price=0
+    networks:
+      besu-internal:
+        ipv4_address: 172.21.0.4
+      besu-shared:
+        ipv4_address: 172.22.0.10
+
+volumes:
+  dc2-node7-data:
+  dc2-node8-data:
+  dc2-node9-data:
+
+networks:
+  besu-internal:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16
+  besu-shared:
+    external: true

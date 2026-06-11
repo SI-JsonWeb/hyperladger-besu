@@ -1,0 +1,58 @@
+- name: Switch between dc2 and dc2-backup based on dc1 health
+  hosts: docker_hosts
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Probe dc1 RPC health
+      ansible.builtin.uri:
+        url: "{{ dc1_healthcheck_url }}"
+        method: POST
+        body_format: json
+        body:
+          jsonrpc: "2.0"
+          id: 1
+          method: eth_blockNumber
+          params: []
+        status_code: 200
+        timeout: 5
+      register: dc1_probe
+      failed_when: false
+      changed_when: false
+
+    - name: Derive dc1 availability
+      ansible.builtin.set_fact:
+        dc1_is_up: "{{ dc1_probe.status | default(0) == 200 }}"
+
+    - name: Stop dc2 when dc1 is down
+      ansible.builtin.command:
+        cmd: docker compose down --remove-orphans
+      args:
+        chdir: "{{ dc2_compose_dir }}"
+      register: dc2_down_result
+      failed_when: false
+      changed_when: dc2_down_result.rc == 0 and not (dc1_is_up | bool)
+      when: not (dc1_is_up | bool)
+
+    - name: Start dc2-backup when dc1 is down
+      ansible.builtin.command:
+        cmd: docker compose up -d --remove-orphans
+      args:
+        chdir: "{{ dc2_backup_compose_dir }}"
+      when: not (dc1_is_up | bool)
+
+    - name: Stop dc2-backup when dc1 is healthy
+      ansible.builtin.command:
+        cmd: docker compose down --remove-orphans
+      args:
+        chdir: "{{ dc2_backup_compose_dir }}"
+      register: dc2_backup_down_result
+      failed_when: false
+      changed_when: dc2_backup_down_result.rc == 0 and (dc1_is_up | bool)
+      when: dc1_is_up | bool
+
+    - name: Start dc2 when dc1 is healthy
+      ansible.builtin.command:
+        cmd: docker compose up -d --remove-orphans
+      args:
+        chdir: "{{ dc2_compose_dir }}"
+      when: dc1_is_up | bool
