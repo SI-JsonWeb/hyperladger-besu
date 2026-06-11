@@ -1,0 +1,29 @@
+sequenceDiagram
+  autonumber
+  participant App1 as App on Node 1
+  participant Besu1 as Besu / Node 1
+  participant Tessera1 as Tessera 1
+  participant Chain as Public marker transaction
+  participant Tessera2 as Tessera 2
+  participant Besu2 as Besu / Node 2
+  participant App2 as App on Node 2
+  participant Besu3 as Besu / Node 3
+
+  App1->>Besu1: Submit private tx request
+  Besu1->>Tessera1: Forward payload + privacy metadata
+
+  Note over Tessera1: Tessera 1 stores the private payload
+  Note over Tessera1,Tessera2: Shares encrypted payload only with permitted participants
+
+  Tessera1->>Tessera2: Deliver encrypted private payload
+  Tessera1-->>Besu1: Return marker/reference for public chain
+
+  Besu1->>Chain: Sign and broadcast marker tx
+  Chain-->>Besu1: Included in block
+
+  Tessera2-->>Besu2: Provide private payload to Node 2
+  Besu2->>Besu2: Execute private tx locally
+  Besu2-->>App2: Private receipt available
+
+  Note over Besu3: Node 3 is not a participant
+  Besu3-->>Besu3: Can only see public marker tx

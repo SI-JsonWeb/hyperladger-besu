@@ -1,0 +1,57 @@
+{
+    "hash": "0x64b257a199b853a8ed4cf7ef004f35e3950cf8317e2cda32429cb9d2549b4ed1",
+    "parentHash": "0xb0194a0bc223d183342a309c02270de5ddb456eca7beffd6bdf5b545a620362a",
+    "number": 2061,
+    "timestamp": 1780995753,
+    "timestampISO": "2026-06-09T09:02:33.000Z",
+    "miner": "0x1ba9867f53ff9c80aad8e4b965780a58c20505d6",
+    "gasLimit": 9007199254740991,
+    "gasUsed": 21512,
+    "gasUsedPercent": "0.00",
+    "size": 976,
+    "transactions": [
+        {
+            "hash": "0xa71542b516125ae1aee6894391f6d1fec4da98d8be0b61ebe9e0049154ced647",
+            "blockHash": "0x64b257a199b853a8ed4cf7ef004f35e3950cf8317e2cda32429cb9d2549b4ed1",
+            "blockNumber": 2061,
+            "from": "0xea78f04b94005d02d31a7166671ff105aaf41301",
+            "to": "0x000000000000000000000000000000000000007e",
+            "isContractDeploy": false,
+            "isPrivate": true,
+            "valueWei": "0",
+            "valueEth": "0",
+            "gas": 250000,
+            "gasPrice": "0",
+            "nonce": 0,
+            "transactionIndex": 0,
+            "input": {
+                "raw": "0x63abdb7727c6556cc5f7682c81e1c7c67a70d4875b8ef392c2b7de4ee58f4620",
+                "type": "private_transaction",
+                "enclaveKey": "0x63abdb7727c6556cc5f7682c81e1c7c67a70d4875b8ef392c2b7de4ee58f4620",
+                "decoded": false,
+                "privateData": {
+                    "accessible": true,
+                    "privacyGroupId": "pFBkPabIzoUX4BzAQHALFXQwu5PedAbeF+ppPx//FF8=",
+                    "status": "success",
+                    "logs": [],
+                    "gasUsed": 0,
+                    "payload": null
+                }
+            },
+            "timestamp": 1780995753,
+            "timestampISO": "2026-06-09T09:02:33.000Z",
+            "type": 0
+        }
+    ],
+    "transactionCount": 1,
+    "extraData": {
+        "validators": [
+            "0x161c7134982ab79de80eb8db5154665ca88e356a",
+            "0x1ba9867f53ff9c80aad8e4b965780a58c20505d6",
+            "0x621bf71ce13bbb96b91f2588f69fa1e3d81dd484",
+            "0x6f5d12675014dfe3206bbd1acd68dac6c43f6e60"
+        ],
+        "validatorCount": 4,
+        "round": 0
+    }
+}

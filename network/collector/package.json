@@ -1,0 +1,11 @@
+{
+  "name": "block-collector",
+  "version": "1.0.0",
+  "dependencies": {
+    "ioredis": "^5.3.2",
+    "request": "^2.88.2",
+    "web3": "^1.10.4",
+    "web3-legacy": "npm:web3@^1.10.4",
+    "web3js-quorum": "^22.4.0"
+  }
+}

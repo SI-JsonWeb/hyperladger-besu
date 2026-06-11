@@ -1,0 +1,50 @@
+{
+    "hash": "0xe9da723524024ef0bee52ef3e282277f14b06ca34ec57b89968f6f83e12c9ee7",
+    "parentHash": "0x9946727707b4b6fc0ea519243fa5acd550085d7685e777f9b3748300f1b1bb7c",
+    "number": 2233,
+    "timestamp": 1780996097,
+    "timestampISO": "2026-06-09T09:08:17.000Z",
+    "miner": "0x1ba9867f53ff9c80aad8e4b965780a58c20505d6",
+    "gasLimit": 9007199254740991,
+    "gasUsed": 21176,
+    "gasUsedPercent": "0.00",
+    "size": 957,
+    "transactions": [
+        {
+            "hash": "0x4dbc0f304ddf56d824a27c2a55dfa0f15c91d0274ff07b285d0eddee32ed7fb9",
+            "blockHash": "0xe9da723524024ef0bee52ef3e282277f14b06ca34ec57b89968f6f83e12c9ee7",
+            "blockNumber": 2233,
+            "from": "0x161c7134982ab79de80eb8db5154665ca88e356a",
+            "to": "0x1ba9867f53ff9c80aad8e4b965780a58c20505d6",
+            "isContractDeploy": false,
+            "isPrivate": false,
+            "valueWei": "0",
+            "valueEth": "0",
+            "gas": 250000,
+            "gasPrice": "0",
+            "nonce": 0,
+            "transactionIndex": 0,
+            "input": {
+                "raw": "0x48656c6c6f20576f726c64",
+                "type": "contract_call",
+                "methodId": "0x48656c6c",
+                "method": "unknown",
+                "paramsRaw": "6f20576f726c64"
+            },
+            "timestamp": 1780996097,
+            "timestampISO": "2026-06-09T09:08:17.000Z",
+            "type": 0
+        }
+    ],
+    "transactionCount": 1,
+    "extraData": {
+        "validators": [
+            "0x161c7134982ab79de80eb8db5154665ca88e356a",
+            "0x1ba9867f53ff9c80aad8e4b965780a58c20505d6",
+            "0x621bf71ce13bbb96b91f2588f69fa1e3d81dd484",
+            "0x6f5d12675014dfe3206bbd1acd68dac6c43f6e60"
+        ],
+        "validatorCount": 4,
+        "round": 0
+    }
+}
